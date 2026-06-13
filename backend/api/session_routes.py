@@ -621,6 +621,27 @@ async def end_session(session_id: str):
     return {"status": "ok"}
 
 
+# ── 12. heartbeat — is this session still alive? ─────────────────────────────
+
+@router.get("/{session_id}/status")
+async def get_session_status(session_id: str):
+    """
+    Lightweight liveness check used by the frontend generating screen.
+    Returns 404 if the session has expired or been deleted so the UI can
+    surface a helpful "session expired" message instead of spinning forever.
+    """
+    s = store.get(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    return {
+        "alive": True,
+        "has_plan": s.slide_plan is not None,
+        "has_output": s.output_filename is not None,
+        "page_count": len(s.pages),
+        "updated_at": s.updated_at,
+    }
+
+
 def _safe_remove(path: str | None) -> None:
     if not path:
         return

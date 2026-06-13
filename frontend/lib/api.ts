@@ -60,8 +60,14 @@ export async function generatePPTFromUrl(
   return res.json();
 }
 
+/**
+ * Download URLs go through the Next.js proxy routes (/api/download/... and
+ * /api/download-pdf/...) so they are same-origin. The browser's `download`
+ * attribute only works on same-origin URLs — a direct link to the FastAPI
+ * backend (different port) would open a blank tab instead of saving the file.
+ */
 export function getDownloadURL(filename: string): string {
-  return `${BASE_URL}/api/download/${encodeURIComponent(filename)}`;
+  return `/api/download/${encodeURIComponent(filename)}`;
 }
 
 export function getPreviewURL(filename: string): string {
@@ -69,7 +75,7 @@ export function getPreviewURL(filename: string): string {
 }
 
 export function getPdfDownloadURL(filename: string): string {
-  return `${BASE_URL}/api/download-pdf/${encodeURIComponent(filename)}`;
+  return `/api/download-pdf/${encodeURIComponent(filename)}`;
 }
 
 export interface HealthStatus {
@@ -249,4 +255,15 @@ export async function endSession(sessionId: string): Promise<void> {
   await fetch(`${BASE_URL}/api/session/${sessionId}`, { method: "DELETE" }).catch(
     () => {}
   );
+}
+
+export async function checkSessionAlive(sessionId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/session/${sessionId}/status`, {
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

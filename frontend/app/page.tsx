@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   AppStep,
   PDFContext,
@@ -22,6 +22,7 @@ import {
   generateFromSession,
   endSession,
   checkHealth,
+  checkSessionAlive,
 } from "@/lib/api";
 import {
   Compass,
@@ -42,6 +43,48 @@ const DEFAULT_CONTEXT: PDFContext = {
   language: "English",
   annotations: [],
 };
+
+const STORAGE_KEY = "deckpilot_session";
+
+interface PersistedState {
+  sessionId: string;
+  step: AppStep;
+  context: PDFContext;
+  pages: PageExtractionView[];
+  plan: PlanResponse | null;
+  result: GenerateResponse | null;
+  savedAt: number;
+}
+
+function saveToStorage(state: Partial<PersistedState>) {
+  try {
+    const existing = loadFromStorage();
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...existing, ...state, savedAt: Date.now() })
+    );
+  } catch {
+    // localStorage may be blocked (private mode, quota exceeded) — fail silently
+  }
+}
+
+function loadFromStorage(): PersistedState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedState;
+  } catch {
+    return null;
+  }
+}
+
+function clearStorage() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 const WIZARD: { step: AppStep; label: string }[] = [
   { step: "upload", label: "Upload" },
@@ -71,6 +114,37 @@ export default function Home() {
   const [previewAvailable, setPreviewAvailable] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const { toasts, notify, dismiss } = useToasts();
+
+  // ── Restore session from localStorage on first load ──────────────────────
+  useEffect(() => {
+    const saved = loadFromStorage();
+    if (!saved?.sessionId) return;
+
+    // Verify backend session is still alive before restoring UI state.
+    // If the backend restarted or TTL expired, we silently discard the save.
+    checkSessionAlive(saved.sessionId).then((alive) => {
+      if (!alive) {
+        clearStorage();
+        return;
+      }
+      setSessionId(saved.sessionId);
+      setContext(saved.context ?? DEFAULT_CONTEXT);
+      setPages(saved.pages ?? []);
+      setPlan(saved.plan ?? null);
+      setResult(saved.result ?? null);
+      // Don't restore "generating" step — user should re-trigger or see done
+      const safeStep = saved.step === "generating" ? "review-plan" : saved.step;
+      setStep(safeStep);
+      notify("Session restored — pick up where you left off", "success");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Persist key state to localStorage whenever it changes ────────────────
+  useEffect(() => {
+    if (!sessionId) return;
+    saveToStorage({ sessionId, step, context, pages, plan, result });
+  }, [sessionId, step, context, pages, plan, result]);
 
   useEffect(() => {
     checkHealth().then((h) => {
@@ -148,6 +222,7 @@ export default function Home() {
 
   const handleReset = useCallback(() => {
     if (sessionId) endSession(sessionId);
+    clearStorage();
     setStep("upload");
     setFile(null);
     setPdfUrl("");
@@ -169,6 +244,25 @@ export default function Home() {
 
   const wide = step === "review-pages" || step === "review-plan" || step === "done";
   const currentIdx = WIZARD.findIndex((w) => w.step === step);
+
+  // Which completed steps can the user jump back to right now?
+  // Rules: session must exist to jump to pages/plan, result must exist for done.
+  // Jumping never clears state — it just changes which component is rendered.
+  const canJumpTo = (target: AppStep): boolean => {
+    if (step === "generating") return false; // block navigation mid-generation
+    if (target === "upload") return currentIdx > 0;
+    if (target === "configure") return currentIdx > 1;
+    if (target === "review-pages") return Boolean(sessionId) && currentIdx > 2;
+    if (target === "review-plan") return Boolean(plan) && currentIdx > 3;
+    if (target === "done") return Boolean(result);
+    return false;
+  };
+
+  const jumpTo = (target: AppStep) => {
+    if (!canJumpTo(target)) return;
+    setError(null);
+    setStep(target);
+  };
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -208,14 +302,19 @@ export default function Home() {
             {WIZARD.map((w, i) => {
               const isActive = w.step === step;
               const isDone = i < currentIdx;
+              const jumpable = isDone && canJumpTo(w.step);
               return (
                 <div key={w.step} className="flex items-center gap-2">
                   <div
+                    onClick={() => jumpable && jumpTo(w.step)}
+                    title={jumpable ? `Go back to ${w.label}` : undefined}
                     className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all ${
                       isActive
                         ? "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/30"
+                        : jumpable
+                        ? "cursor-pointer text-zinc-400 hover:bg-white/6 hover:text-zinc-200 hover:ring-1 hover:ring-white/15"
                         : isDone
-                        ? "text-zinc-500"
+                        ? "text-zinc-600"
                         : "text-zinc-700"
                     }`}
                   >
@@ -396,7 +495,16 @@ export default function Home() {
             )}
 
             {/* ── generating ── */}
-            {step === "generating" && <GeneratingScreen />}
+            {step === "generating" && sessionId && (
+              <GeneratingScreen
+                sessionId={sessionId}
+                onCancel={() => {
+                  if (sessionId) endSession(sessionId);
+                  setGenerating(false);
+                  setStep("review-plan");
+                }}
+              />
+            )}
 
             {/* ── done ── */}
             {step === "done" && result && (
@@ -441,32 +549,154 @@ export default function Home() {
   );
 }
 
-function GeneratingScreen() {
+const SOFT_WARN_MS = 15 * 60 * 1000; // 15 minutes
+const HEARTBEAT_MS = 30 * 1000;       // 30 seconds
+
+function GeneratingScreen({
+  sessionId,
+  onCancel,
+}: {
+  sessionId: string;
+  onCancel: () => void;
+}) {
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [serverUnreachable, setServerUnreachable] = useState(false);
+  const [showSoftWarning, setShowSoftWarning] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const startTime = useRef(Date.now());
+
+  // Elapsed timer — ticks every second
+  useEffect(() => {
+    const id = setInterval(() => {
+      const sec = Math.floor((Date.now() - startTime.current) / 1000);
+      setElapsedSec(sec);
+      if (Date.now() - startTime.current >= SOFT_WARN_MS) {
+        setShowSoftWarning(true);
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Heartbeat — ping session every 30s to detect backend crash
+  useEffect(() => {
+    let missedBeats = 0;
+    const id = setInterval(async () => {
+      const alive = await checkSessionAlive(sessionId);
+      if (!alive) {
+        missedBeats++;
+        if (missedBeats >= 2) setServerUnreachable(true);
+      } else {
+        missedBeats = 0;
+        setServerUnreachable(false);
+      }
+    }, HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, [sessionId]);
+
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
   return (
     <div className="flex flex-col items-center justify-center gap-5 py-12 animate-fade-in">
       <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient shadow-xl shadow-indigo-500/30 animate-pulse-ring">
         <Sparkles className="h-9 w-9 text-white" />
       </div>
+
       <div className="text-center">
         <h2 className="text-lg font-semibold text-white">Building your PowerPoint</h2>
         <p className="mt-1 text-sm text-zinc-500">
           Writing slides, fitting layouts and styling your deck…
         </p>
+        <p className="mt-2 text-xs text-zinc-600">
+          Elapsed: {formatTime(elapsedSec)}
+        </p>
       </div>
+
       <div className="w-full max-w-xs space-y-2">
-        {["Writing slide content", "Fitting & paginating", "Generating .pptx"].map(
+        {["Extracting & planning", "Writing slide content", "Fitting & paginating", "Generating .pptx"].map(
           (label, i) => (
             <div
               key={label}
               className="flex items-center gap-2 rounded-lg bg-white/3 px-3 py-2 text-xs text-zinc-400 animate-fade-up"
               style={{ animationDelay: `${i * 150}ms` }}
             >
-              <div className="dp-spinner h-3.5 w-3.5" />
+              <div className="dp-spinner h-3.5 w-3.5 shrink-0" />
               {label}
             </div>
           )
         )}
       </div>
+
+      {/* Server unreachable warning */}
+      {serverUnreachable && (
+        <div className="w-full max-w-xs rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3 animate-fade-up">
+          <p className="text-xs font-medium text-amber-300">Server seems unreachable</p>
+          <p className="mt-0.5 text-xs text-amber-400/70">
+            Your generation may still be running. Check your backend connection.
+          </p>
+        </div>
+      )}
+
+      {/* 15-minute soft warning */}
+      {showSoftWarning && !confirmCancel && (
+        <div className="w-full max-w-xs rounded-xl border border-orange-500/30 bg-orange-500/8 px-4 py-3 space-y-3 animate-fade-up">
+          <p className="text-xs font-medium text-orange-300">Taking longer than usual</p>
+          <p className="text-xs text-orange-400/70">
+            Generation has been running for {formatTime(elapsedSec)}. Large PDFs with many slides can take 10–15 min. Your deck is likely still being built.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSoftWarning(false)}
+              className="flex-1 rounded-lg bg-white/8 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/12 transition-colors"
+            >
+              Keep waiting
+            </button>
+            <button
+              onClick={() => setConfirmCancel(true)}
+              className="flex-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/15 transition-colors"
+            >
+              Cancel & restart
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel confirm dialog */}
+      {confirmCancel && (
+        <div className="w-full max-w-xs rounded-xl border border-red-500/30 bg-red-500/8 px-4 py-3 space-y-3 animate-fade-up">
+          <p className="text-xs font-medium text-red-300">Cancel generation?</p>
+          <p className="text-xs text-red-400/70">
+            This will stop the current run. You&apos;ll go back to the Plan Review step and can try again.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setConfirmCancel(false)}
+              className="flex-1 rounded-lg bg-white/8 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/12 transition-colors"
+            >
+              Keep waiting
+            </button>
+            <button
+              onClick={onCancel}
+              className="flex-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 transition-colors"
+            >
+              Yes, cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Always-visible cancel button */}
+      {!confirmCancel && !showSoftWarning && (
+        <button
+          onClick={() => setConfirmCancel(true)}
+          className="mt-2 text-xs text-zinc-600 hover:text-zinc-400 underline underline-offset-2 transition-colors"
+        >
+          Cancel generation
+        </button>
+      )}
     </div>
   );
 }
