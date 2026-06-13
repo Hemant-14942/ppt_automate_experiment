@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-05-28T03:54:47Z",
+  "subject": "English",
+  "purpose": "Revision",
+  "class_level": "Competitive Exam",
+  "language": "English",
+  "batch": "arjuna",
+  "page_count": 9,
+  "slide_count": 50,
+  "layout_distribution": {
+    "title_slide": 1,
+    "pyq_grid_slide": 30,
+    "section_heading": 1,
+    "mcq_grid_slide": 16,
+    "summary": 1,
+    "thank_you_slide": 1
+  },
+  "bullet_length_stats": {
+    "avg": 1.12,
+    "max": 7.0,
+    "count": 189.0
+  },
+  "title_length_stats": {
+    "avg_chars": 39.78,
+    "max_chars": 97.0
+  },
+  "layout_overrides": [],
+  "plan_fixes": [
+    {
+      "action": "insert_heading",
+      "slide_number": 32,
+      "detail": "To clearly separate Previous Year Questions from general practice MCQs."
+    },
+    {
+      "action": "remove_slide",
+      "slide_number": 34,
+      "detail": "Duplicate slide content found at original slide 33."
+    },
+    {
+      "action": "remove_slide",
+      "slide_number": 36,
+      "detail": "Duplicate slide content found at original slide 35."
+    },
+    {
+      "action": "remove_slide",
+      "slide_number": 38,
+      "detail": "Duplicate slide content found at original slide 37."
+    },
+    {
+      "action": "remove_slide",
+      "slide_number": 40,
+      "detail": "Duplicate slide content found at original slide 39."
+    },
+    {
+      "action": "remove_slide",
+      "slide_number": 52,
+      "detail": "Slide is incomplete, lacking options."
+    }
+  ],
+  "faithfulness_flags": [],
+  "visual_flags": [
+    {
+      "slide_number": 1,
+      "score": 2,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the main title text so it fits within the banner."
+    },
+    {
+      "slide_number": 4,
+      "score": 2,
+      "issue_types": [
+        "text_overflow",
+        "off_screen"
+      ],
+      "hint": "Shorten the main question and the header text to fit the slide."
+    },
+    {
+      "slide_number": 26,
+      "score": 2,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the exam details in the banner."
+    },
+    {
+      "slide_number": 27,
+      "score": 3,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the text in the title banner to prevent clipping."
+    },
+    {
+      "slide_number": 32,
+      "score": 3,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the title to fit completely within the heading banner."
+    },
+    {
+      "slide_number": 40,
+      "score": 2,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the question title."
+    }
+  ],
+  "visual_retries": 2,
+  "final_status": "success"
+}

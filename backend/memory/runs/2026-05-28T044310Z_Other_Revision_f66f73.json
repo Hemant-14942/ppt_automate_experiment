@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-05-28T04:43:10Z",
+  "subject": "Other",
+  "purpose": "Revision",
+  "class_level": "Competitive Exam",
+  "language": "English",
+  "batch": "arjuna",
+  "page_count": 9,
+  "slide_count": 12,
+  "layout_distribution": {
+    "title_slide": 1,
+    "section_heading": 1,
+    "pyq_grid_slide": 8,
+    "summary": 1,
+    "thank_you_slide": 1
+  },
+  "bullet_length_stats": {
+    "avg": 1.44,
+    "max": 6.0,
+    "count": 36.0
+  },
+  "title_length_stats": {
+    "avg_chars": 35.92,
+    "max_chars": 75.0
+  },
+  "layout_overrides": [],
+  "plan_fixes": [
+    {
+      "action": "insert_heading",
+      "slide_number": 2,
+      "detail": "Insert a section heading to clearly introduce the block of PYQ exercises."
+    }
+  ],
+  "faithfulness_flags": [],
+  "visual_flags": [
+    {
+      "slide_number": 2,
+      "score": 3,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the title so it fits within the banner."
+    }
+  ],
+  "visual_retries": 2,
+  "final_status": "success"
+}

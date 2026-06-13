@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-05-27T16:46:39Z",
+  "subject": "English",
+  "purpose": "Revision",
+  "class_level": "Competitive Exam",
+  "language": "English",
+  "batch": "ARJUNA",
+  "page_count": 6,
+  "slide_count": 4,
+  "layout_distribution": {
+    "title_slide": 1,
+    "pyq_grid_slide": 2,
+    "thank_you_slide": 1
+  },
+  "bullet_length_stats": {
+    "avg": 1.0,
+    "max": 1.0,
+    "count": 8.0
+  },
+  "title_length_stats": {
+    "avg_chars": 17.25,
+    "max_chars": 29.0
+  },
+  "layout_overrides": [
+    {
+      "slide_number": 2,
+      "from_layout": "mcq_slide",
+      "to_layout": "pyq_grid_slide",
+      "confidence": 0.95,
+      "reason": "Short options + PYQ"
+    },
+    {
+      "slide_number": 3,
+      "from_layout": "mcq_slide",
+      "to_layout": "pyq_grid_slide",
+      "confidence": 0.95,
+      "reason": "Short options + PYQ"
+    }
+  ],
+  "plan_fixes": [],
+  "faithfulness_flags": [],
+  "visual_flags": [],
+  "visual_retries": 0,
+  "final_status": "success"
+}

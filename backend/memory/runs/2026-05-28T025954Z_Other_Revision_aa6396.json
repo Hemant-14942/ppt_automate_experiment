@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-05-28T02:59:54Z",
+  "subject": "Other",
+  "purpose": "Revision",
+  "class_level": "Competitive Exam",
+  "language": "English",
+  "batch": "arjuna",
+  "page_count": 9,
+  "slide_count": 8,
+  "layout_distribution": {
+    "title_slide": 1,
+    "pyq_grid_slide": 5,
+    "summary": 1,
+    "thank_you_slide": 1
+  },
+  "bullet_length_stats": {
+    "avg": 2.04,
+    "max": 9.0,
+    "count": 24.0
+  },
+  "title_length_stats": {
+    "avg_chars": 31.75,
+    "max_chars": 59.0
+  },
+  "layout_overrides": [],
+  "plan_fixes": [],
+  "faithfulness_flags": [],
+  "visual_flags": [
+    {
+      "slide_number": 1,
+      "score": 2,
+      "issue_types": [
+        "text_overflow"
+      ],
+      "hint": "Shorten the main title so it fits within the banner area."
+    }
+  ],
+  "visual_retries": 2,
+  "final_status": "success"
+}

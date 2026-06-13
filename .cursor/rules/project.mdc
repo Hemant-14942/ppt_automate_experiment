@@ -1,0 +1,32 @@
+---
+description: PDF-to-PPT project structure and conventions
+alwaysApply: true
+---
+
+# PDF to PPT Generator
+
+AI pipeline that converts teaching PDFs into PowerPoint slides.
+
+## Layout
+
+- `backend/` — FastAPI server, agents, pipeline (`backend/pipeline/`), PPTX generation
+- `frontend/` — Next.js UI
+- `backend/assets/` — reference PPT assets required for generation
+- `docs/input/` and `docs/output/` — test PDFs and sample outputs
+
+## Run locally
+
+```bash
+# Backend API
+cd backend && source .venv/bin/activate && uvicorn app:app --reload
+
+# Frontend
+cd frontend && npm run dev
+```
+
+## Conventions
+
+- Python venv lives at repo root (`.venv/`) or in `backend/.venv/`
+- Secrets in `.env` — never commit
+- Pipeline entry: `backend/pipeline/orchestrator.py` → `run_pipeline_async()`
+- Keep changes minimal; match existing agent/pipeline patterns in `backend/agents/`

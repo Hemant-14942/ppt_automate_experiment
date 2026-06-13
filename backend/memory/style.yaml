@@ -1,0 +1,96 @@
+tone: educational, clear, direct
+font_style: concise, no fluff — every word must earn its place
+max_bullets: 5
+max_bullet_words: 12
+first_slide_must_be: title_slide
+last_slide_must_be: thank_you_slide
+prefer_summary_before_thank_you: true
+section_heading_only_on_topic_shifts: true
+recap_slide_only_if_pdf_mentions_previous_lecture: true
+topics_slide_only_if_pdf_lists_agenda: true
+homework_slide_only_if_pdf_has_practice_tasks: true
+learned_rules: []
+learned_hints:
+- key: english_revision_short_mcq_layout
+  value: 'For subject=English purpose=Revision: prefer pyq_grid_slide for short-option
+    MCQs'
+  confidence: 0.9
+  evidence_runs: 3
+  rationale: The layout picker consistently overrode mcq_slide to pyq_grid_slide for
+    English Revision PDFs with short-option MCQs across 3 runs, indicating a clear
+    preference for the latter in this context.
+  added_at: '2026-05-28T03:00:03Z'
+- key: english_revision_theory_to_pyq_grid
+  value: For subject=English purpose=Revision, if content is multiple PYQ MCQs with
+    short options, prefer pyq_grid_slide.
+  confidence: 0.9
+  evidence_runs: 1
+  rationale: The layout picker consistently overrode theory_slide to pyq_grid_slide
+    for English Revision PDFs with multiple PYQ MCQs with short options (7 times in
+    one run), indicating a clear preference.
+  added_at: '2026-05-28T03:37:11Z'
+- key: shorten_exam_title_banner_text
+  value: Keep main titles and exam details in banner areas concise to avoid text overflow.
+  confidence: 0.8
+  evidence_runs: 2
+  rationale: Visual critic repeatedly flagged text overflow in titles and banner text
+    across two runs, indicating a need for conciseness in these elements.
+  added_at: '2026-05-28T03:37:11Z'
+- key: avoid_redundant_exam_date_slides
+  value: Avoid creating dedicated slides for exam date information if it's already
+    present elsewhere.
+  confidence: 0.9
+  evidence_runs: 1
+  rationale: Plan critic repeatedly removed slides containing only exam date information
+    (8 times in one run) that was deemed redundant.
+  added_at: '2026-05-28T03:37:11Z'
+- key: remove_incomplete_mcq_slides
+  value: Automatically remove MCQ slides if the source text lacks complete question
+    options.
+  confidence: 0.9
+  evidence_runs: 1
+  rationale: Plan critic removed 2 slides for incomplete MCQs lacking options in one
+    run, indicating a need to automatically filter such content.
+  added_at: '2026-05-28T03:37:11Z'
+- key: verify_mcq_answers_carefully
+  value: Double-check MCQ answers extracted from source material for accuracy to prevent
+    factual errors.
+  confidence: 0.95
+  evidence_runs: 1
+  rationale: Writer repeatedly hallucinated incorrect MCQ answers across 4 instances
+    in one run, highlighting a critical faithfulness issue.
+  added_at: '2026-05-28T03:37:11Z'
+- key: max_title_characters
+  value: Limit main slide titles to 70 characters to prevent text overflow in banners.
+  confidence: 0.8
+  evidence_runs: 3
+  rationale: Visual critic repeatedly flagged text overflow in titles and banner areas
+    across 3 runs, with title lengths reaching up to 120 characters, indicating a
+    need for a stricter character limit.
+  added_at: '2026-05-28T03:55:07Z'
+- key: enforce_max_bullets
+  value: Strictly adhere to a maximum of 5 bullet points per slide to maintain readability.
+  confidence: 0.9
+  evidence_runs: 2
+  rationale: The system's `bullet_max` exceeded the configured `max_bullets` (5) in
+    two separate runs (7.0 and 10.0), indicating individual slides frequently have
+    too many bullet points.
+  added_at: '2026-05-28T03:55:07Z'
+- key: remove_duplicate_slides
+  value: Automatically remove slides with identical content to prevent repetition.
+  confidence: 0.9
+  evidence_runs: 2
+  rationale: Plan critic removed duplicate slide content multiple times across two
+    runs (4 times in one, 2 times in another), highlighting a recurring issue with
+    redundant slides.
+  added_at: '2026-05-28T03:55:07Z'
+- key: section_heading_for_pyq_separation
+  value: Insert section headings to clearly separate Previous Year Questions from
+    other content sections.
+  confidence: 0.8
+  evidence_runs: 2
+  rationale: Plan critic explicitly inserted section headings in two runs 'to clearly
+    separate Previous Year Questions from general practice,' indicating the need for
+    clearer topic shifts in revision material.
+  added_at: '2026-05-28T03:55:07Z'
+last_learner_run: '2026-05-28T03:55:07Z'

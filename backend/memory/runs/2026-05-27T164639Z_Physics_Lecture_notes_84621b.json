@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-05-27T16:46:39Z",
+  "subject": "Physics",
+  "purpose": "Lecture notes",
+  "class_level": "Class 11",
+  "language": "English",
+  "batch": "ARJUNA",
+  "page_count": 3,
+  "slide_count": 1,
+  "layout_distribution": {
+    "title_slide": 1
+  },
+  "bullet_length_stats": {
+    "avg": 0.0,
+    "max": 0.0,
+    "count": 0.0
+  },
+  "title_length_stats": {
+    "avg_chars": 6.0,
+    "max_chars": 6.0
+  },
+  "layout_overrides": [],
+  "plan_fixes": [],
+  "faithfulness_flags": [],
+  "visual_flags": [],
+  "visual_retries": 0,
+  "final_status": "success"
+}
