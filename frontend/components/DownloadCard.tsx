@@ -41,7 +41,7 @@ export default function DownloadCard({
 
   const stats = [
     { value: result.total_pages ?? "—", label: "Pages read", tint: "text-white" },
-    { value: slides || "—", label: "Slides created", tint: "text-violet-300" },
+    { value: slides || "—", label: "Slides created", tint: "text-orange-300" },
     { value: readMin ? `~${readMin}m` : "—", label: "Read time", tint: "text-white" },
     {
       value: genSec ? `${genSec}s` : "—",
@@ -58,7 +58,7 @@ export default function DownloadCard({
           <div className="flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient brand-glow-shadow animate-pulse-ring">
             <Sparkles className="h-9 w-9 text-white" />
           </div>
-          <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-2 ring-[#0d0e18]">
+          <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg ring-2 ring-[#1a0e08]">
             <Check className="h-3.5 w-3.5" />
           </span>
         </div>

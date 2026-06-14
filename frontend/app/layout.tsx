@@ -8,7 +8,7 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "DeckPilot — AI co-pilot for PDF → PPT",
+  title: "PPTPilot — AI co-pilot for PDF → PPT",
   description:
     "Turn any teaching PDF into a polished slide deck. Review every page and slide before you generate — you stay in control.",
 };
@@ -21,8 +21,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="min-h-full antialiased">
-        {/* Fixed ambient glow behind everything — pointer-events-none */}
+        {/* Fixed ambient layer behind everything — light beams + crossing grid */}
         <div className="ambient-bg" aria-hidden="true">
+          <div className="grid-overlay" />
+          <div className="light-beam" />
           <div className="ambient-orb-3" />
         </div>
         <div className="relative z-10">{children}</div>

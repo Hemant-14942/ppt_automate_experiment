@@ -353,7 +353,7 @@ export default function PlanReview({
                 s.template
               )} ${
                 overNum === s.slide_number && dragNum !== s.slide_number
-                  ? "border-violet-400/60 ring-1 ring-violet-400/40"
+                  ? "border-orange-400/60 ring-1 ring-orange-400/40"
                   : "border-white/8 hover:border-white/12 hover:bg-white/[0.035]"
               } ${dragNum === s.slide_number ? "opacity-50" : ""} ${
                 flashId === s.slide_number ? "animate-flash" : ""
@@ -416,7 +416,7 @@ export default function PlanReview({
               {isOpen && (
                 <div className="animate-fade-up border-t border-white/6 p-3">
                   {busyId === s.slide_number && (
-                    <div className="mb-3 flex items-center gap-2 text-xs text-violet-300">
+                    <div className="mb-3 flex items-center gap-2 text-xs text-orange-300">
                       <div className="dp-spinner h-4 w-4" /> Working…
                     </div>
                   )}
@@ -428,7 +428,7 @@ export default function PlanReview({
                       <input
                         value={draftTitle}
                         onChange={(e) => setDraftTitle(e.target.value)}
-                        className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
+                        className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
                       />
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                         Points (one per line)
@@ -436,7 +436,7 @@ export default function PlanReview({
                       <textarea
                         value={draftPoints}
                         onChange={(e) => setDraftPoints(e.target.value)}
-                        className="min-h-[80px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
+                        className="min-h-[80px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
                       />
                       <PanelActions
                         onSave={() => saveEdit(s.slide_number)}
@@ -456,7 +456,7 @@ export default function PlanReview({
                         value={feedback}
                         onChange={(e) => setFeedback(e.target.value)}
                         placeholder="e.g. Show all four options in full, make this a theory slide…"
-                        className="min-h-[72px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-violet-500/50"
+                        className="min-h-[72px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-orange-500/50"
                       />
                       <PanelActions
                         onSave={() => saveRewrite(s.slide_number)}
@@ -476,7 +476,7 @@ export default function PlanReview({
       {/* Add slide */}
       <div className="mt-3 rounded-xl border border-dashed border-white/12 bg-white/[0.01] p-3">
         {adding ? (
-          <div className="flex items-center gap-2 text-xs text-violet-300">
+          <div className="flex items-center gap-2 text-xs text-orange-300">
             <div className="dp-spinner h-4 w-4" /> Adding slide…
           </div>
         ) : (
@@ -499,7 +499,7 @@ export default function PlanReview({
               value={addNote}
               onChange={(e) => setAddNote(e.target.value)}
               placeholder="What should it contain? (optional)"
-              className="min-w-[180px] flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-violet-500/50"
+              className="min-w-[180px] flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-orange-500/50"
             />
             <button
               onClick={handleAdd}

@@ -285,7 +285,7 @@ export default function PageReview({
             <span className="text-2xl font-extrabold leading-none text-white tabular-nums">
               {page.page_number}
             </span>
-            <span className="absolute -bottom-1.5 -right-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#0d0e18] px-1.5 text-[11px] font-bold text-zinc-400 ring-1 ring-white/10 tabular-nums">
+            <span className="absolute -bottom-1.5 -right-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#1a0e08] px-1.5 text-[11px] font-bold text-zinc-400 ring-1 ring-white/10 tabular-nums">
               /{pages.length}
             </span>
           </div>
@@ -351,7 +351,7 @@ export default function PageReview({
             onClick={() => goto(i)}
             className={`relative flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg px-2 text-xs font-semibold transition-all ${
               i === idx
-                ? "bg-violet-500/20 text-violet-200 ring-1 ring-violet-400/50"
+                ? "bg-orange-500/20 text-orange-200 ring-1 ring-orange-400/50"
                 : "bg-white/4 text-zinc-500 ring-1 ring-white/8 hover:bg-white/8"
             }`}
           >
@@ -362,7 +362,7 @@ export default function PageReview({
               </span>
             )}
             {p.status === "skipped" && (
-              <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-zinc-600 ring-2 ring-[#08090f]" />
+              <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-zinc-600 ring-2 ring-[#100805]" />
             )}
           </button>
         ))}
@@ -391,7 +391,7 @@ export default function PageReview({
               {CONTENT_LABELS[page.content_type] ?? page.content_type}
             </span>
             {page.question_count > 0 && (
-              <span className="rounded-md bg-violet-500/30 px-2 py-1 text-[10px] font-medium text-violet-100 backdrop-blur">
+              <span className="rounded-md bg-orange-500/30 px-2 py-1 text-[10px] font-medium text-orange-100 backdrop-blur">
                 {page.question_count} questions
               </span>
             )}
@@ -404,7 +404,7 @@ export default function PageReview({
         {/* Right — decision panel */}
         <div className="flex flex-col rounded-2xl border border-white/8 bg-white/2">
           <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3">
-            <Sparkles className="h-4 w-4 text-purple-300" />
+            <Sparkles className="h-4 w-4 text-amber-300" />
             <span className="text-sm font-semibold text-white">
               What goes into the PPT?
             </span>
@@ -434,7 +434,7 @@ export default function PageReview({
                   onClick={() => setMode("choose")}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
                     mode === "choose"
-                      ? "bg-purple-500/15 text-purple-200 shadow-sm ring-1 ring-purple-500/30"
+                      ? "bg-amber-500/15 text-amber-200 shadow-sm ring-1 ring-amber-500/30"
                       : "text-zinc-500 hover:text-zinc-300"
                   }`}
                 >
@@ -448,7 +448,7 @@ export default function PageReview({
           {/* Body */}
           <div className="relative max-h-[440px] flex-1 overflow-y-auto px-4 py-3">
             {busy && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#0b0c12]/80 backdrop-blur-sm">
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#140a06]/80 backdrop-blur-sm">
                 <div className="dp-spinner h-7 w-7" />
                 <p className="text-xs text-zinc-400">Working…</p>
               </div>
@@ -464,7 +464,7 @@ export default function PageReview({
                   <div className="flex gap-2 text-[11px]">
                     <button
                       onClick={selectAll}
-                      className="rounded-md px-2 py-0.5 font-medium text-purple-300 transition hover:bg-purple-500/10"
+                      className="rounded-md px-2 py-0.5 font-medium text-amber-300 transition hover:bg-amber-500/10"
                     >
                       Select all
                     </button>
@@ -486,14 +486,14 @@ export default function PageReview({
                         key={it.id}
                         className={`rounded-xl border transition ${
                           checked
-                            ? "border-purple-500/30 bg-purple-500/5"
+                            ? "border-amber-500/30 bg-amber-500/5"
                             : "border-white/8 bg-black/20"
                         }`}
                       >
                         <div className="flex items-start gap-2.5 px-3 py-2.5">
                           <button
                             onClick={() => toggleItem(it.id)}
-                            className="mt-0.5 shrink-0 text-purple-300"
+                            className="mt-0.5 shrink-0 text-amber-300"
                             aria-label={checked ? "Deselect" : "Select"}
                           >
                             {checked ? (
@@ -510,7 +510,7 @@ export default function PageReview({
                               className={`mr-2 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
                                 it.kind === "intro"
                                   ? "bg-white/8 text-zinc-300"
-                                  : "bg-violet-500/20 text-violet-200"
+                                  : "bg-orange-500/20 text-orange-200"
                               }`}
                             >
                               {it.label}
@@ -581,7 +581,7 @@ export default function PageReview({
             </div>
 
             {page.last_feedback && (
-              <p className="mt-3 rounded-lg border border-purple-500/15 bg-purple-500/5 px-3 py-2 text-[11px] text-purple-200/80">
+              <p className="mt-3 rounded-lg border border-amber-500/15 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200/80">
                 Last correction: “{page.last_feedback}”
               </p>
             )}
@@ -598,7 +598,7 @@ export default function PageReview({
                   onClick={() => setShowInstBox(true)}
                   className="group flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left transition hover:border-white/15 hover:bg-white/5"
                 >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/5 text-zinc-400 transition group-hover:bg-violet-500/15 group-hover:text-violet-300">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/5 text-zinc-400 transition group-hover:bg-orange-500/15 group-hover:text-orange-300">
                     <PencilLine className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -614,7 +614,7 @@ export default function PageReview({
                     )}
                   </div>
                   {instruction && (
-                    <span className="shrink-0 rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-300">
+                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">
                       Saved
                     </span>
                   )}
@@ -643,7 +643,7 @@ export default function PageReview({
                     onChange={(e) => setInstBoxText(e.target.value)}
                     placeholder="e.g. include only Q5, Q7 and Q9  ·  Q15 text is wrong  ·  ignore the page header"
                     rows={2}
-                    className="min-h-[52px] w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[13px] text-white placeholder-zinc-600 outline-none transition focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/25"
+                    className="min-h-[52px] w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[13px] text-white placeholder-zinc-600 outline-none transition focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/25"
                   />
 
                   {/* Two action rows with clear purpose labels */}
@@ -652,16 +652,16 @@ export default function PageReview({
                     <button
                       onClick={() => handleReExtract(instBoxText)}
                       disabled={!instBoxText.trim() || busy}
-                      className="group flex items-center gap-3 rounded-lg border border-purple-500/25 bg-purple-500/8 px-3 py-2.5 text-left transition hover:border-purple-500/40 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="group flex items-center gap-3 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2.5 text-left transition hover:border-amber-500/40 hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-purple-500/15 text-purple-300">
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-300">
                         <RotateCcw className="h-3.5 w-3.5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[12px] font-semibold text-purple-200">
+                        <p className="text-[12px] font-semibold text-amber-200">
                           Re-read this page with my instruction
                         </p>
-                        <p className="text-[10px] text-purple-300/50">
+                        <p className="text-[10px] text-amber-300/50">
                           AI extracts again → extraction panel updates → you verify
                         </p>
                       </div>
@@ -716,7 +716,7 @@ export default function PageReview({
                 className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                   page.status === "approved"
                     ? "bg-emerald-500/90 text-[#042016] hover:bg-emerald-400"
-                    : "brand-gradient text-white shadow-lg shadow-violet-500/20 hover:brightness-110"
+                    : "brand-gradient text-white shadow-lg shadow-orange-500/20 hover:brightness-110"
                 }`}
               >
                 <Check className="h-3.5 w-3.5" />
@@ -760,7 +760,7 @@ export default function PageReview({
               ? "Review every page (keep or skip) and keep at least one"
               : ""
           }
-          className="flex items-center gap-2 rounded-xl brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex items-center gap-2 rounded-xl brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-orange-500/25 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
         >
           {building ? (
             <>

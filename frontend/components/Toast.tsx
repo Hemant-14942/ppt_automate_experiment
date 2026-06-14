@@ -46,8 +46,8 @@ const TONE: Record<ToastType, { ring: string; icon: React.ReactNode }> = {
     icon: <AlertTriangle className="h-4 w-4 text-red-400" />,
   },
   info: {
-    ring: "ring-violet-500/30 bg-violet-500/10",
-    icon: <Info className="h-4 w-4 text-violet-300" />,
+    ring: "ring-orange-500/30 bg-orange-500/10",
+    icon: <Info className="h-4 w-4 text-orange-300" />,
   },
 };
 

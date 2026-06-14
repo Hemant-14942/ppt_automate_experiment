@@ -245,13 +245,13 @@ export default function AnalyticsModal({
       onClick={onClose}
     >
       <div
-        className="my-8 w-full max-w-4xl rounded-3xl border border-white/10 bg-[#111113] shadow-2xl shadow-black/60"
+        className="my-8 w-full max-w-4xl rounded-3xl border border-white/10 bg-[#1a1310] shadow-2xl shadow-black/60"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/8 px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-600/20 text-violet-300">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-600/20 text-orange-300">
               <Activity className="h-5 w-5" />
             </div>
             <div>

@@ -60,7 +60,7 @@ export default function PreviewPane({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <Eye className="h-3.5 w-3.5 text-violet-400" />
+          <Eye className="h-3.5 w-3.5 text-orange-400" />
           <span className="text-xs font-medium text-zinc-300">
             Slide preview
           </span>
@@ -80,7 +80,7 @@ export default function PreviewPane({
       <div className="relative h-[640px] w-full bg-black">
         {status === "loading" && (
           <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-zinc-500">
-            <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-orange-400" />
             <p className="text-xs">Converting PPTX to preview (5-10s)…</p>
           </div>
         )}

@@ -9,10 +9,10 @@ interface ContextFormProps {
 }
 
 const inputCls =
-  "w-full rounded-xl border border-white/8 bg-white/4 px-4 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-violet-500/60 focus:bg-white/6 focus:ring-1 focus:ring-violet-500/30";
+  "w-full rounded-xl border border-white/8 bg-white/4 px-4 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-all focus:border-orange-500/60 focus:bg-white/6 focus:ring-1 focus:ring-orange-500/30";
 
 const selectCls =
-  "w-full appearance-none rounded-xl border border-white/8 bg-white/4 px-4 py-2.5 text-sm text-white outline-none transition-all focus:border-violet-500/60 focus:bg-white/6 focus:ring-1 focus:ring-violet-500/30 cursor-pointer";
+  "w-full appearance-none rounded-xl border border-white/8 bg-white/4 px-4 py-2.5 text-sm text-white outline-none transition-all focus:border-orange-500/60 focus:bg-white/6 focus:ring-1 focus:ring-orange-500/30 cursor-pointer";
 
 const labelCls = "mb-1.5 block text-xs font-medium uppercase tracking-wider text-zinc-500";
 
@@ -140,13 +140,13 @@ export default function ContextForm({ context, onChange }: ContextFormProps) {
       {chips.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5">
           <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
-            <Sparkles className="h-3 w-3 text-violet-400" />
+            <Sparkles className="h-3 w-3 text-orange-400" />
             Deck
           </span>
           {chips.map((c, i) => (
             <span
               key={`${c}-${i}`}
-              className="animate-pop rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-200 ring-1 ring-violet-500/20"
+              className="animate-pop rounded-full bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-200 ring-1 ring-orange-500/20"
             >
               {c}
             </span>
@@ -155,8 +155,8 @@ export default function ContextForm({ context, onChange }: ContextFormProps) {
       )}
 
       {/* What happens next — sets expectations, replaces the old annotation form */}
-      <div className="flex items-start gap-3 rounded-2xl border border-violet-500/15 bg-violet-500/5 p-4">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-violet-400" />
+      <div className="flex items-start gap-3 rounded-2xl border border-orange-500/15 bg-orange-500/5 p-4">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-orange-400" />
         <p className="text-xs leading-relaxed text-zinc-400">
           Next, you&apos;ll review every page the AI read. For each page you
           decide what goes into the PPT — keep everything, pick specific

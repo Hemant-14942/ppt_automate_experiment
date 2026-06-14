@@ -52,9 +52,9 @@ export default function FileUpload({
 
   if (file) {
     return (
-      <div className="animate-pop flex items-center gap-4 rounded-2xl border border-violet-500/30 bg-violet-500/[0.07] px-5 py-4 ring-1 ring-violet-500/10">
-        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-violet-500/15">
-          <FileText className="h-5 w-5 text-violet-300" />
+      <div className="animate-pop flex items-center gap-4 rounded-2xl border border-orange-500/30 bg-orange-500/[0.07] px-5 py-4 ring-1 ring-orange-500/10">
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-orange-500/15">
+          <FileText className="h-5 w-5 text-orange-300" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-white">{file.name}</p>
@@ -82,18 +82,18 @@ export default function FileUpload({
       onDragLeave={onDragLeave}
       className={`group relative flex cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed px-8 py-14 text-center transition-all duration-200 ${
         isDragging
-          ? "scale-[1.01] border-violet-400 bg-violet-500/10 ring-2 ring-violet-500/20"
+          ? "scale-[1.01] border-orange-400 bg-orange-500/10 ring-2 ring-orange-500/20"
           : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
       }`}
     >
       <div
         className={`flex h-14 w-14 items-center justify-center rounded-2xl transition-colors duration-200 ${
-          isDragging ? "bg-violet-500/20" : "bg-white/5 group-hover:bg-white/10"
+          isDragging ? "bg-orange-500/20" : "bg-white/5 group-hover:bg-white/10"
         }`}
       >
         <UploadCloud
           className={`h-6 w-6 transition-colors duration-200 ${
-            isDragging ? "text-violet-400" : "text-zinc-400 group-hover:text-white"
+            isDragging ? "text-orange-400" : "text-zinc-400 group-hover:text-white"
           }`}
         />
       </div>

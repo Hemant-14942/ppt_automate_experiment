@@ -269,11 +269,11 @@ export default function Home() {
       {/* ── Navbar ───────────────────────────────────── */}
       <header className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg brand-gradient shadow-lg shadow-violet-500/30">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg brand-gradient shadow-lg shadow-orange-500/30">
             <Compass className="h-4 w-4 text-white" />
           </div>
-          <span className="text-sm font-semibold text-white">DeckPilot</span>
-          <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-300 ring-1 ring-violet-500/20">
+          <span className="text-sm font-semibold text-white">PPTPilot</span>
+          <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-medium text-orange-300 ring-1 ring-orange-500/20">
             AI
           </span>
         </div>
@@ -310,7 +310,7 @@ export default function Home() {
                     title={jumpable ? `Go back to ${w.label}` : undefined}
                     className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all ${
                       isActive
-                        ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/30"
+                        ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-500/30"
                         : jumpable
                         ? "cursor-pointer text-zinc-400 hover:bg-white/6 hover:text-zinc-200 hover:ring-1 hover:ring-white/15"
                         : isDone
@@ -341,7 +341,7 @@ export default function Home() {
         )}
 
         <div
-          className={`w-full rounded-3xl border border-white/[0.07] bg-[#0d0e18]/80 shadow-2xl shadow-black/50 backdrop-blur ${
+          className={`w-full rounded-3xl border border-white/[0.07] bg-[#1a0e08]/80 shadow-2xl shadow-black/50 backdrop-blur ${
             step === "review-pages"
               ? "max-w-6xl"
               : wide
@@ -358,7 +358,7 @@ export default function Home() {
                     <span className="brand-text">polished deck</span>
                   </>
                 )}
-                {step === "configure" && "Tell DeckPilot about your class"}
+                {step === "configure" && "Tell PPTPilot about your class"}
               </h1>
               <p className="mt-1.5 text-sm text-zinc-500">
                 {step === "upload" &&
@@ -402,7 +402,7 @@ export default function Home() {
                   <label className="mb-2 block text-xs font-medium text-zinc-400">
                     Paste public Google Drive PDF link
                   </label>
-                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/3 px-4 py-3 transition-colors focus-within:border-violet-500/40">
+                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/3 px-4 py-3 transition-colors focus-within:border-orange-500/40">
                     <LinkIcon className="h-4 w-4 shrink-0 text-zinc-500" />
                     <input
                       value={pdfUrl}
@@ -436,7 +436,7 @@ export default function Home() {
                       className="animate-fade-up rounded-xl border border-white/6 bg-white/[0.02] p-3 text-center"
                       style={{ animationDelay: `${i * 80}ms` }}
                     >
-                      <s.icon className="mx-auto h-4 w-4 text-violet-300" />
+                      <s.icon className="mx-auto h-4 w-4 text-orange-300" />
                       <p className="mt-1.5 text-[11px] font-semibold text-zinc-200">
                         {s.label}
                       </p>
@@ -559,7 +559,7 @@ export default function Home() {
         </div>
 
         <p className="mt-8 text-xs text-zinc-600">
-          DeckPilot · You review every page &amp; slide before it&apos;s built · Powered by Gemini
+          PPTPilot · You review every page &amp; slide before it&apos;s built · Powered by Gemini
         </p>
       </main>
 
@@ -648,13 +648,13 @@ function GeneratingScreen({
 
   return (
     <div className="flex flex-col items-center justify-center gap-5 py-12 animate-fade-in">
-      <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient shadow-xl shadow-violet-500/30 animate-pulse-ring">
+      <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient shadow-xl shadow-orange-500/30 animate-pulse-ring">
         <Sparkles className="h-9 w-9 text-white" />
       </div>
 
       <div className="text-center">
         <h2 className="text-lg font-semibold text-white">Building your PowerPoint</h2>
-        <p key={tipIndex} className="mt-1.5 h-5 text-sm text-violet-300/90 animate-fade-in">
+        <p key={tipIndex} className="mt-1.5 h-5 text-sm text-orange-300/90 animate-fade-in">
           {GENERATING_TIPS[tipIndex]}
         </p>
         <p className="mt-2 text-xs text-zinc-600">
