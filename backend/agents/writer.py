@@ -98,6 +98,75 @@ _MCQ_LAYOUTS = {
     TemplateType.pyq_grid_slide,
 }
 
+_TABLE_LAYOUTS = {
+    TemplateType.table_slide,
+    TemplateType.theory_table_slide,
+}
+
+
+def _recover_table_from_text(source_content: list[dict]):
+    """
+    Deterministic safety net for table_slide / theory_table_slide.
+
+    The writer LLM sometimes returns a table layout WITHOUT structured
+    `table_data` (or drops the table to prose), so the renderer silently falls
+    back to a bullets-only theory slide and the table vanishes. When that
+    happens we reparse the table straight from the source page text.
+
+    Recognises three delimiters, in order of confidence:
+      1. " | " pipes      → "Indian | Western"
+      2. TAB separators   → "Indian\tWestern"
+      3. runs of 2+ spaces → "Indian Civilization    Western Civilization"
+
+    Returns a TableBlock (headers + rows) or None if nothing table-shaped is
+    found. The first consistent row is treated as the header row.
+    """
+    from collections import Counter
+    from schemas.slide_content import TableBlock
+
+    blob = "\n".join((s.get("main_text") or "") for s in source_content)
+    if not blob.strip():
+        return None
+
+    splitters = (
+        lambda s: [c.strip() for c in s.split(" | ")] if " | " in s else None,
+        lambda s: [c.strip() for c in s.split("\t")] if "\t" in s else None,
+        lambda s: (
+            [c.strip() for c in re.split(r"\s{2,}", s.strip())]
+            if len(re.split(r"\s{2,}", s.strip())) >= 2
+            else None
+        ),
+    )
+
+    best: Optional[tuple[list[str], list[list[str]]]] = None
+    for split in splitters:
+        block: list[list[str]] = []
+        captured: list[list[str]] = []
+        for ln in blob.splitlines():
+            cells = split(ln) if ln.strip() else None
+            if cells and len(cells) >= 2 and all(c for c in cells):
+                block.append(cells)
+            else:
+                if len(block) > len(captured):
+                    captured = block
+                block = []
+        if len(block) > len(captured):
+            captured = block
+
+        # Keep only rows whose width matches the modal (most common) width.
+        if len(captured) >= 3:
+            ncol = Counter(len(r) for r in captured).most_common(1)[0][0]
+            if ncol >= 2:
+                kept = [r for r in captured if len(r) == ncol]
+                if len(kept) >= 3:
+                    best = (kept[0], kept[1:])
+                    break  # pipes/tabs are high-confidence; stop at first hit
+
+    if not best:
+        return None
+    headers, rows = best
+    return TableBlock(headers=headers, rows=rows)
+
 # Captures "(a) <text>" option groups, where <text> runs until the next
 # "(b)"/"(c)"/… marker or end of string. Handles both inline and multi-line.
 _OPTION_PAT = re.compile(
@@ -549,6 +618,8 @@ async def _write_slide_async(
                 "main_text":          p.main_text,
                 "diagrams_described": p.diagrams_described,
                 "instructor_notes":   p.instructor_notes,
+                "has_table":          getattr(p, "has_table", False),
+                "table_description":  getattr(p, "table_description", None),
                 "annotations": [
                     {"type": a.type, "target": a.target, "instruction": a.instruction}
                     for a in p.annotations
@@ -589,6 +660,30 @@ async def _write_slide_async(
                         slide.bullets = recovered[:4]
                         print(f"  Slide {payload.my_slide.slide_number} — "
                               f"recovered {len(recovered)} MCQ option(s) from source")
+
+            # Table safety net. A table layout (from the LLM OR the plan) MUST
+            # carry structured table_data, else the renderer degrades to a
+            # bullets-only theory slide and the table is lost. Recover it from
+            # the source page text when it's missing.
+            plan_wants_table = payload.my_slide.template in _TABLE_LAYOUTS
+            td = getattr(slide, "table_data", None)
+            td_empty = not td or not td.headers or not td.rows
+            if (slide.layout in _TABLE_LAYOUTS or plan_wants_table) and td_empty:
+                recovered_tbl = _recover_table_from_text(source_content)
+                if recovered_tbl is not None:
+                    slide.table_data = recovered_tbl
+                    if slide.layout not in _TABLE_LAYOUTS:
+                        slide.layout = payload.my_slide.template
+                    print(f"  Slide {payload.my_slide.slide_number} — "
+                          f"recovered table ({len(recovered_tbl.rows)} rows) from source")
+                elif slide.layout in _TABLE_LAYOUTS:
+                    # No table to recover — degrade gracefully so we don't render
+                    # a table layout with an empty grid.
+                    slide.layout = TemplateType.theory_slide
+                    if not [b for b in slide.bullets if b and b.strip()]:
+                        slide.bullets = _normalize_theory_bullets(
+                            payload.my_slide.key_points[:6]
+                        )
 
             print(f"  Slide {payload.my_slide.slide_number} — written OK")
             return slide

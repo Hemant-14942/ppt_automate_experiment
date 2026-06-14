@@ -52,16 +52,20 @@ export default function FileUpload({
 
   if (file) {
     return (
-      <div className="flex items-center gap-4 rounded-2xl border border-violet-500/30 bg-violet-500/5 px-5 py-4">
+      <div className="animate-pop flex items-center gap-4 rounded-2xl border border-violet-500/30 bg-violet-500/[0.07] px-5 py-4 ring-1 ring-violet-500/10">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-violet-500/15">
-          <FileText className="h-5 w-5 text-violet-400" />
+          <FileText className="h-5 w-5 text-violet-300" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-white">{file.name}</p>
-          <p className="mt-0.5 text-xs text-zinc-500">{formatBytes(file.size)}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
+            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            {formatBytes(file.size)} · ready to analyse
+          </p>
         </div>
         <button
           onClick={onFileClear}
+          aria-label="Remove file"
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/5 hover:text-white"
         >
           <X className="h-4 w-4" />
@@ -78,7 +82,7 @@ export default function FileUpload({
       onDragLeave={onDragLeave}
       className={`group relative flex cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed px-8 py-14 text-center transition-all duration-200 ${
         isDragging
-          ? "border-violet-400 bg-violet-500/10"
+          ? "scale-[1.01] border-violet-400 bg-violet-500/10 ring-2 ring-violet-500/20"
           : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
       }`}
     >

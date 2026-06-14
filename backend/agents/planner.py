@@ -498,15 +498,46 @@ def _summarize_include_targets(page: ExtractedPage) -> list[str]:
     return targets
 
 
+def _looks_tabular(text: str) -> bool:
+    """
+    Heuristic table sniff for the planner — catches tables that extraction did
+    NOT flag (has_table=false) because they were borderless / tab-aligned, e.g.
+    a "Indian Civilization vs Western Civilization" two-column comparison.
+
+    A page is treated as tabular if EITHER:
+      • it has ≥3 pipe-delimited rows ("a | b | c"), OR
+      • it has ≥3 lines that each split into ≥2 columns by a TAB or a run of
+        2+ spaces (aligned columns), OR
+      • it mentions a comparison ("vs"/"versus"/"comparison") AND has ≥2 such
+        aligned multi-column lines.
+    """
+    if not text:
+        return False
+    if text.count(" | ") >= 3:
+        return True
+
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    multicol = 0
+    for ln in lines:
+        if "\t" in ln or len(re.split(r"\s{2,}", ln.strip())) >= 2:
+            multicol += 1
+    if multicol >= 3:
+        return True
+
+    low = text.lower()
+    if multicol >= 2 and (" vs " in low or " versus " in low or "comparison" in low):
+        return True
+    return False
+
+
 def _detect_table_pages(extracted_pages: list[ExtractedPage]) -> str:
     """Generate a TABLE DETECTION summary for the planner prompt."""
     table_pages = []
     for p in extracted_pages:
         has_explicit = getattr(p, 'has_table', False)
         text = (p.main_text or "")
-        has_pipe_table = text.count(" | ") >= 3
         ct = p.content_type.value if hasattr(p.content_type, 'value') else str(p.content_type)
-        if has_explicit or has_pipe_table or ct == "table":
+        if has_explicit or _looks_tabular(text) or ct == "table":
             desc = getattr(p, 'table_description', None) or "(table detected from content)"
             table_pages.append(f"  - Page {p.page_number}: {desc}")
     if not table_pages:

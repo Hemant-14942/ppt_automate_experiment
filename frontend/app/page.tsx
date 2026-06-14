@@ -269,11 +269,11 @@ export default function Home() {
       {/* ── Navbar ───────────────────────────────────── */}
       <header className="flex items-center justify-between border-b border-white/5 px-6 py-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg brand-gradient shadow-lg shadow-indigo-500/30">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg brand-gradient shadow-lg shadow-violet-500/30">
             <Compass className="h-4 w-4 text-white" />
           </div>
           <span className="text-sm font-semibold text-white">DeckPilot</span>
-          <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-300 ring-1 ring-indigo-500/20">
+          <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-300 ring-1 ring-violet-500/20">
             AI
           </span>
         </div>
@@ -310,7 +310,7 @@ export default function Home() {
                     title={jumpable ? `Go back to ${w.label}` : undefined}
                     className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-all ${
                       isActive
-                        ? "bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-500/30"
+                        ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/30"
                         : jumpable
                         ? "cursor-pointer text-zinc-400 hover:bg-white/6 hover:text-zinc-200 hover:ring-1 hover:ring-white/15"
                         : isDone
@@ -341,7 +341,7 @@ export default function Home() {
         )}
 
         <div
-          className={`w-full rounded-3xl border border-white/[0.07] bg-[#0c0d13]/80 shadow-2xl shadow-black/50 backdrop-blur ${
+          className={`w-full rounded-3xl border border-white/[0.07] bg-[#0d0e18]/80 shadow-2xl shadow-black/50 backdrop-blur ${
             step === "review-pages"
               ? "max-w-6xl"
               : wide
@@ -350,14 +350,19 @@ export default function Home() {
           }`}
         >
           {(step === "upload" || step === "configure") && (
-            <div className="border-b border-white/5 px-6 py-5">
-              <h1 className="text-base font-semibold text-white">
-                {step === "upload" && "Upload your teaching PDF"}
+            <div className="border-b border-white/5 px-7 py-6">
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                {step === "upload" && (
+                  <>
+                    Turn any teaching PDF into a{" "}
+                    <span className="brand-text">polished deck</span>
+                  </>
+                )}
                 {step === "configure" && "Tell DeckPilot about your class"}
               </h1>
-              <p className="mt-0.5 text-sm text-zinc-500">
+              <p className="mt-1.5 text-sm text-zinc-500">
                 {step === "upload" &&
-                  "Any PDF — MCQs, theory, mixed. You'll review every page next."}
+                  "MCQs, theory or mixed — upload it and review every page before a single slide is built."}
                 {step === "configure" &&
                   "This tailors the deck. You stay in control at every step."}
               </p>
@@ -366,7 +371,7 @@ export default function Home() {
 
           <div className="p-6">
             {error && (
-              <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 p-4 animate-fade-up">
+              <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/8 p-4 animate-slide-down">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                 <div>
                   <p className="text-sm font-medium text-red-300">Something went wrong</p>
@@ -397,7 +402,7 @@ export default function Home() {
                   <label className="mb-2 block text-xs font-medium text-zinc-400">
                     Paste public Google Drive PDF link
                   </label>
-                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/3 px-4 py-3 transition-colors focus-within:border-indigo-500/40">
+                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/3 px-4 py-3 transition-colors focus-within:border-violet-500/40">
                     <LinkIcon className="h-4 w-4 shrink-0 text-zinc-500" />
                     <input
                       value={pdfUrl}
@@ -413,11 +418,32 @@ export default function Home() {
                 <button
                   disabled={!hasPdfSource}
                   onClick={() => setStep("configure")}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl brand-gradient px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 active:scale-[0.98]"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl brand-gradient px-5 py-3 text-sm font-semibold text-white brand-glow-shadow transition-all hover:scale-[1.01] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100 active:scale-[0.98]"
                 >
                   Continue
                   <ChevronRight className="h-4 w-4" />
                 </button>
+
+                {/* How it works — sets expectations before the user commits */}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {[
+                    { icon: ScanSearch, label: "Review pages", sub: "AI reads each page" },
+                    { icon: Sparkles, label: "Tune the plan", sub: "Edit every slide" },
+                    { icon: Compass, label: "Download deck", sub: ".pptx in minutes" },
+                  ].map((s, i) => (
+                    <div
+                      key={s.label}
+                      className="animate-fade-up rounded-xl border border-white/6 bg-white/[0.02] p-3 text-center"
+                      style={{ animationDelay: `${i * 80}ms` }}
+                    >
+                      <s.icon className="mx-auto h-4 w-4 text-violet-300" />
+                      <p className="mt-1.5 text-[11px] font-semibold text-zinc-200">
+                        {s.label}
+                      </p>
+                      <p className="text-[10px] text-zinc-600">{s.sub}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -448,7 +474,7 @@ export default function Home() {
                   <button
                     disabled={!isFormValid || serverOnline === false || starting}
                     onClick={handleAnalyse}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl brand-gradient px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-500/20 transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 active:scale-[0.98]"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl brand-gradient px-5 py-3 text-sm font-semibold text-white brand-glow-shadow transition-all hover:scale-[1.01] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100 active:scale-[0.98]"
                   >
                     {starting ? (
                       <>
@@ -532,8 +558,8 @@ export default function Home() {
           </div>
         </div>
 
-        <p className="mt-8 text-xs text-zinc-700">
-          DeckPilot · You review every page & slide before it&apos;s built · Powered by Gemini
+        <p className="mt-8 text-xs text-zinc-600">
+          DeckPilot · You review every page &amp; slide before it&apos;s built · Powered by Gemini
         </p>
       </main>
 
@@ -552,6 +578,18 @@ export default function Home() {
 const SOFT_WARN_MS = 15 * 60 * 1000; // 15 minutes
 const HEARTBEAT_MS = 30 * 1000;       // 30 seconds
 
+// Rotating micro-copy — makes the wait feel alive (Devin/Linear pattern: every
+// wait state is a trust-building moment).
+const GENERATING_TIPS = [
+  "Reading your approved pages…",
+  "Asking Gemini to write each slide…",
+  "Fitting MCQ options into the template…",
+  "Keeping every slide faithful to your PDF…",
+  "Paginating long theory into clean slides…",
+  "Applying your brand styling…",
+  "Polishing the final .pptx…",
+];
+
 function GeneratingScreen({
   sessionId,
   onCancel,
@@ -563,7 +601,16 @@ function GeneratingScreen({
   const [serverUnreachable, setServerUnreachable] = useState(false);
   const [showSoftWarning, setShowSoftWarning] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [tipIndex, setTipIndex] = useState(0);
   const startTime = useRef(Date.now());
+
+  // Rotate the micro-copy every 3.5s
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTipIndex((i) => (i + 1) % GENERATING_TIPS.length);
+    }, 3500);
+    return () => clearInterval(id);
+  }, []);
 
   // Elapsed timer — ticks every second
   useEffect(() => {
@@ -601,14 +648,14 @@ function GeneratingScreen({
 
   return (
     <div className="flex flex-col items-center justify-center gap-5 py-12 animate-fade-in">
-      <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient shadow-xl shadow-indigo-500/30 animate-pulse-ring">
+      <div className="relative flex h-20 w-20 items-center justify-center rounded-3xl brand-gradient shadow-xl shadow-violet-500/30 animate-pulse-ring">
         <Sparkles className="h-9 w-9 text-white" />
       </div>
 
       <div className="text-center">
         <h2 className="text-lg font-semibold text-white">Building your PowerPoint</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Writing slides, fitting layouts and styling your deck…
+        <p key={tipIndex} className="mt-1.5 h-5 text-sm text-violet-300/90 animate-fade-in">
+          {GENERATING_TIPS[tipIndex]}
         </p>
         <p className="mt-2 text-xs text-zinc-600">
           Elapsed: {formatTime(elapsedSec)}

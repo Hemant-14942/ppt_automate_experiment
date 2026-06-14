@@ -20,7 +20,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
-      <body className="min-h-full antialiased">{children}</body>
+      <body className="min-h-full antialiased">
+        {/* Fixed ambient glow behind everything — pointer-events-none */}
+        <div className="ambient-bg" aria-hidden="true">
+          <div className="ambient-orb-3" />
+        </div>
+        <div className="relative z-10">{children}</div>
+      </body>
     </html>
   );
 }

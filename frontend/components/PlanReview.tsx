@@ -73,6 +73,31 @@ function templateTone(t: string): string {
   return "text-zinc-300 bg-white/5 ring-white/10";
 }
 
+// Left-border accent so the deck can be scanned by type at a glance.
+function templateBorder(t: string): string {
+  if (t.startsWith("mcq") || t === "question_only") return "border-l-indigo-400/70";
+  if (t.startsWith("pyq")) return "border-l-fuchsia-400/70";
+  if (t.includes("table")) return "border-l-amber-400/70";
+  if (t === "theory_slide" || t === "passage_slide") return "border-l-cyan-400/70";
+  return "border-l-zinc-500/50";
+}
+
+// Composition categories for the deck overview bar.
+const COMPOSITION: { key: string; label: string; bar: string; dot: string; match: (t: string) => boolean }[] = [
+  { key: "mcq", label: "MCQ", bar: "bg-indigo-400", dot: "bg-indigo-400", match: (t) => t.startsWith("mcq") || t === "question_only" },
+  { key: "pyq", label: "PYQ", bar: "bg-fuchsia-400", dot: "bg-fuchsia-400", match: (t) => t.startsWith("pyq") },
+  { key: "theory", label: "Theory", bar: "bg-cyan-400", dot: "bg-cyan-400", match: (t) => t === "theory_slide" || t === "passage_slide" },
+  { key: "table", label: "Table", bar: "bg-amber-400", dot: "bg-amber-400", match: (t) => t.includes("table") },
+  { key: "structural", label: "Structure", bar: "bg-zinc-500", dot: "bg-zinc-500", match: () => true },
+];
+
+function categorize(template: string): string {
+  for (const c of COMPOSITION) {
+    if (c.match(template)) return c.key;
+  }
+  return "structural";
+}
+
 export default function PlanReview({
   sessionId,
   plan,
@@ -95,6 +120,14 @@ export default function PlanReview({
   const [addNote, setAddNote] = useState("");
   const [dragNum, setDragNum] = useState<number | null>(null);
   const [overNum, setOverNum] = useState<number | null>(null);
+  // Slide number to flash green after a successful edit/rewrite, so the change
+  // is felt rather than silently applied.
+  const [flashId, setFlashId] = useState<number | null>(null);
+
+  const flash = (n: number) => {
+    setFlashId(n);
+    window.setTimeout(() => setFlashId((cur) => (cur === n ? null : cur)), 1000);
+  };
 
   const replaceSlide = (s: SlideOutlineView) => {
     onPlanChange({
@@ -131,6 +164,7 @@ export default function PlanReview({
       });
       replaceSlide(updated);
       closePanel();
+      flash(n);
       notify(`Slide ${n} updated`, "success");
     } catch (e) {
       notify((e as Error).message || "Could not save slide", "error");
@@ -146,6 +180,7 @@ export default function PlanReview({
       const updated = await rewriteSlide(sessionId, n, feedback.trim());
       replaceSlide(updated);
       closePanel();
+      flash(n);
       notify(`Slide ${n} rewritten`, "success");
     } catch (e) {
       notify((e as Error).message || "Rewrite failed", "error");
@@ -234,6 +269,37 @@ export default function PlanReview({
         </span>
       </div>
 
+      {/* Deck composition — scan the shape of the deck at a glance */}
+      {(() => {
+        const counts = COMPOSITION.map((c) => ({
+          ...c,
+          count: plan.slides.filter((s) => categorize(s.template) === c.key).length,
+        })).filter((c) => c.count > 0);
+        const total = plan.slides.length || 1;
+        return (
+          <div className="mb-5">
+            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/5">
+              {counts.map((c) => (
+                <div
+                  key={c.key}
+                  className={`${c.bar} transition-all duration-500`}
+                  style={{ width: `${(c.count / total) * 100}%` }}
+                  title={`${c.label}: ${c.count}`}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {counts.map((c) => (
+                <span key={c.key} className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <span className={`h-2 w-2 rounded-full ${c.dot}`} />
+                  {c.count} {c.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Coverage hint — compares detected questions vs question slides planned */}
       {(() => {
         const qSlides = plan.slides.filter((s) =>
@@ -283,11 +349,15 @@ export default function PlanReview({
                 setOverNum(null);
               }}
               onDrop={() => handleDrop(s.slide_number)}
-              className={`animate-fade-up rounded-xl border bg-white/[0.02] transition ${
+              className={`animate-fade-up rounded-xl border border-l-[3px] bg-white/[0.02] transition ${templateBorder(
+                s.template
+              )} ${
                 overNum === s.slide_number && dragNum !== s.slide_number
-                  ? "border-indigo-400/60 ring-1 ring-indigo-400/40"
-                  : "border-white/8 hover:border-white/12"
-              } ${dragNum === s.slide_number ? "opacity-50" : ""}`}
+                  ? "border-violet-400/60 ring-1 ring-violet-400/40"
+                  : "border-white/8 hover:border-white/12 hover:bg-white/[0.035]"
+              } ${dragNum === s.slide_number ? "opacity-50" : ""} ${
+                flashId === s.slide_number ? "animate-flash" : ""
+              }`}
               style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}
             >
               <div className="flex items-start gap-2 p-3">
@@ -346,7 +416,7 @@ export default function PlanReview({
               {isOpen && (
                 <div className="animate-fade-up border-t border-white/6 p-3">
                   {busyId === s.slide_number && (
-                    <div className="mb-3 flex items-center gap-2 text-xs text-cyan-300">
+                    <div className="mb-3 flex items-center gap-2 text-xs text-violet-300">
                       <div className="dp-spinner h-4 w-4" /> Working…
                     </div>
                   )}
@@ -358,7 +428,7 @@ export default function PlanReview({
                       <input
                         value={draftTitle}
                         onChange={(e) => setDraftTitle(e.target.value)}
-                        className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/50"
+                        className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
                       />
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                         Points (one per line)
@@ -366,7 +436,7 @@ export default function PlanReview({
                       <textarea
                         value={draftPoints}
                         onChange={(e) => setDraftPoints(e.target.value)}
-                        className="min-h-[80px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-indigo-500/50"
+                        className="min-h-[80px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white outline-none focus:border-violet-500/50"
                       />
                       <PanelActions
                         onSave={() => saveEdit(s.slide_number)}
@@ -386,7 +456,7 @@ export default function PlanReview({
                         value={feedback}
                         onChange={(e) => setFeedback(e.target.value)}
                         placeholder="e.g. Show all four options in full, make this a theory slide…"
-                        className="min-h-[72px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-cyan-500/50"
+                        className="min-h-[72px] w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-zinc-600 outline-none focus:border-violet-500/50"
                       />
                       <PanelActions
                         onSave={() => saveRewrite(s.slide_number)}
@@ -406,7 +476,7 @@ export default function PlanReview({
       {/* Add slide */}
       <div className="mt-3 rounded-xl border border-dashed border-white/12 bg-white/[0.01] p-3">
         {adding ? (
-          <div className="flex items-center gap-2 text-xs text-cyan-300">
+          <div className="flex items-center gap-2 text-xs text-violet-300">
             <div className="dp-spinner h-4 w-4" /> Adding slide…
           </div>
         ) : (
@@ -429,7 +499,7 @@ export default function PlanReview({
               value={addNote}
               onChange={(e) => setAddNote(e.target.value)}
               placeholder="What should it contain? (optional)"
-              className="min-w-[180px] flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-indigo-500/50"
+              className="min-w-[180px] flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white placeholder-zinc-600 outline-none focus:border-violet-500/50"
             />
             <button
               onClick={handleAdd}
@@ -452,7 +522,7 @@ export default function PlanReview({
         <button
           onClick={onGenerate}
           disabled={generating || plan.slides.length === 0}
-          className="flex items-center gap-2 rounded-xl brand-gradient px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex items-center gap-2 rounded-xl brand-gradient px-5 py-2.5 text-sm font-semibold text-white brand-glow-shadow transition-all hover:scale-[1.01] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
         >
           {generating ? (
             <>

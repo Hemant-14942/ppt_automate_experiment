@@ -1,7 +1,7 @@
 "use client";
 
 import { PDFContext } from "@/types";
-import { ChevronDown, Info } from "lucide-react";
+import { ChevronDown, Info, Sparkles } from "lucide-react";
 
 interface ContextFormProps {
   context: PDFContext;
@@ -28,6 +28,15 @@ function SelectWrapper({ children }: { children: React.ReactNode }) {
 export default function ContextForm({ context, onChange }: ContextFormProps) {
   const set = <K extends keyof PDFContext>(key: K, val: PDFContext[K]) =>
     onChange({ ...context, [key]: val });
+
+  // Live summary chips — assemble in real-time as the user fills the form.
+  const chips = [
+    context.subject,
+    context.batch.trim(),
+    context.purpose,
+    context.class_level,
+    context.language,
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -126,6 +135,24 @@ export default function ContextForm({ context, onChange }: ContextFormProps) {
           </SelectWrapper>
         </div>
       </div>
+
+      {/* Live preview — shows the deck "identity" assembling as fields fill in */}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5">
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            <Sparkles className="h-3 w-3 text-violet-400" />
+            Deck
+          </span>
+          {chips.map((c, i) => (
+            <span
+              key={`${c}-${i}`}
+              className="animate-pop rounded-full bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-200 ring-1 ring-violet-500/20"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* What happens next — sets expectations, replaces the old annotation form */}
       <div className="flex items-start gap-3 rounded-2xl border border-violet-500/15 bg-violet-500/5 p-4">
