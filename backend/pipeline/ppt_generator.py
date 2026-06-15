@@ -119,6 +119,7 @@ LAYOUT_TO_TEMPLATE_IDX = {
     TemplateType.summary:           10,
     TemplateType.homework_slide:    11,
     TemplateType.thank_you_slide:   12,
+    TemplateType.figure_slide:       3,   # blank dark slide — we draw tag + image/text
 }
 
 
@@ -2434,6 +2435,213 @@ def _set_notes(slide, text):
 # Router — pick the right filler for each layout
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _fill_figure_slide(slide, content: SlideContent):
+    """
+    Render a detected diagram/figure/formula on a blank dark slide.
+
+    Two modes (set by the teacher during review):
+      • image → the cropped PNG, scaled to fit and centred on a white card so a
+                white-background crop reads cleanly on the dark canvas.
+      • text  → the figure's description rendered as large readable text.
+
+    Everything is a normal movable/resizable shape, so the teacher can reposition
+    or delete it in PowerPoint.
+    """
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+
+    CANVAS_W = 40.0
+    fig = content.figure
+
+    _clear_unused_placeholders(slide)
+
+    # Title pill at the top (reuses the brand yellow-tag style).
+    title = content.title or (fig.label if fig else "") or "Diagram"
+    try:
+        _draw_yellow_title_tag(slide, title, top_in=0.9)
+    except Exception:
+        pass
+
+    if fig is None:
+        return
+
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    MUTED = RGBColor(0xC9, 0xCC, 0xD3)
+
+    area_top = 3.4
+    area_bottom = 20.6
+    image_done = False
+
+    if fig.kind == "image" and fig.image_path and os.path.exists(fig.image_path):
+        try:
+            from PIL import Image
+            with Image.open(fig.image_path) as im:
+                iw, ih = im.size
+        except Exception:
+            iw, ih = 4, 3
+        iw = max(1, iw); ih = max(1, ih)
+
+        # Reserve room for a caption line under the image.
+        max_w = 32.0
+        max_h = (area_bottom - area_top) - 1.6
+        scale = min(max_w / iw, max_h / ih)
+        w = iw * scale
+        h = ih * scale
+        left = (CANVAS_W - w) / 2.0
+        top = area_top
+
+        # White card behind the crop (small padding around the image).
+        pad = 0.35
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(left - pad), Inches(top - pad),
+            Inches(w + 2 * pad), Inches(h + 2 * pad),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = WHITE
+        card.line.color.rgb = RGBColor(0xE2, 0xE4, 0xEA)
+        card.shadow.inherit = False
+        try:
+            card.adjustments[0] = 0.04
+        except Exception:
+            pass
+
+        slide.shapes.add_picture(
+            fig.image_path, Inches(left), Inches(top),
+            width=Inches(w), height=Inches(h),
+        )
+        caption_top = top + h + pad + 0.25
+        image_done = True
+    else:
+        caption_top = area_top
+
+    # Caption / description text.
+    cap_parts = []
+    if fig.belongs_to:
+        cap_parts.append(str(fig.belongs_to))
+    if fig.description:
+        cap_parts.append(fig.description)
+    caption = "  —  ".join(cap_parts) if image_done else (fig.description or "")
+
+    if caption:
+        box = slide.shapes.add_textbox(
+            Inches(4.0), Inches(caption_top),
+            Inches(CANVAS_W - 8.0),
+            Inches(max(2.0, area_bottom - caption_top)),
+        )
+        tf = box.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.TOP if image_done else MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = caption
+        # Smaller for an image caption, larger when text IS the content.
+        run.font.size = Pt(22 if image_done else 40)
+        run.font.color.rgb = MUTED if image_done else WHITE
+        run.font.name = "Poppins"
+
+
+def _embed_figure_on_slide(slide, fig) -> None:
+    """
+    Embed a chosen figure DIRECTLY on its question slide (placement == on_slide),
+    as a floating picture/text card in the right-hand region. It's a normal
+    movable shape, so the teacher can reposition or resize it in PowerPoint.
+
+    Kept to the right column so it generally sits beside the question/options
+    rather than on top of them; the teacher nudges it if a layout is tight.
+    """
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+
+    CANVAS_W = 40.0
+    CANVAS_H = 22.5
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+
+    # Right-hand reserved box.
+    box_w = 13.5
+    box_h = 13.5
+    box_left = CANVAS_W - box_w - 1.0
+    box_top = 5.0
+
+    if fig.kind == "image" and fig.image_path and os.path.exists(fig.image_path):
+        try:
+            from PIL import Image
+            with Image.open(fig.image_path) as im:
+                iw, ih = im.size
+        except Exception:
+            iw, ih = 4, 3
+        iw = max(1, iw); ih = max(1, ih)
+        scale = min(box_w / iw, box_h / ih)
+        w = iw * scale
+        h = ih * scale
+        left = box_left + (box_w - w) / 2.0
+        top = box_top + (box_h - h) / 2.0
+
+        pad = 0.25
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(left - pad), Inches(top - pad),
+            Inches(w + 2 * pad), Inches(h + 2 * pad),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = WHITE
+        card.line.color.rgb = RGBColor(0xE2, 0xE4, 0xEA)
+        card.shadow.inherit = False
+        try:
+            card.adjustments[0] = 0.05
+        except Exception:
+            pass
+        slide.shapes.add_picture(
+            fig.image_path, Inches(left), Inches(top),
+            width=Inches(w), height=Inches(h),
+        )
+        # Small label chip under the image.
+        if fig.label:
+            chip = slide.shapes.add_textbox(
+                Inches(box_left), Inches(top + h + pad + 0.1),
+                Inches(box_w), Inches(0.9),
+            )
+            tf = chip.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.CENTER
+            r = p.add_run()
+            r.text = fig.label
+            r.font.size = Pt(16)
+            r.font.color.rgb = RGBColor(0xC9, 0xCC, 0xD3)
+            r.font.name = "Poppins"
+    else:
+        # Text figure on slide — a translucent dark card with the description.
+        text = fig.description or fig.label or ""
+        if not text:
+            return
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(box_left), Inches(box_top), Inches(box_w), Inches(box_h),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = RGBColor(0x1A, 0x13, 0x10)
+        card.line.color.rgb = RGBColor(0xFF, 0xCC, 0x31)
+        card.shadow.inherit = False
+        tf = card.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf.margin_left = Inches(0.4)
+        tf.margin_right = Inches(0.4)
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = text
+        r.font.size = Pt(20)
+        r.font.color.rgb = WHITE
+        r.font.name = "Poppins"
+
+
 def _apply_content(slide, content: SlideContent, context: PDFContext, strategy=None):
     t = content.layout
     if t == TemplateType.title_slide:
@@ -2500,6 +2708,8 @@ def _apply_content(slide, content: SlideContent, context: PDFContext, strategy=N
         _fill_summary_or_homework(slide, content)
     elif t == TemplateType.thank_you_slide:
         _fill_thank_you(slide, content)
+    elif t == TemplateType.figure_slide:
+        _fill_figure_slide(slide, content)
     else:
         _clear_unused_placeholders(slide)
 
@@ -2553,6 +2763,12 @@ def generate_pptx(
         try:
             new_slide = _clone_slide(prs, prs.slides[src_idx])
             _apply_content(new_slide, content, context, strategy)
+            # Embed any figures the user pinned ON this slide (placement on_slide).
+            for _fig in (getattr(content, "inline_figures", None) or []):
+                try:
+                    _embed_figure_on_slide(new_slide, _fig)
+                except Exception as fe:
+                    print(f"    Slide {content.slide_number:2d} — inline figure failed: {fe}")
             _remove_explicit_top_left_logo(new_slide)
             _add_top_right_badge(new_slide)
             _apply_devanagari_fonts(new_slide)

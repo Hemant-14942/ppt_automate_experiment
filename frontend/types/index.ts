@@ -80,6 +80,32 @@ export interface PageItemView {
   kind: "question" | "intro";
 }
 
+export interface FigureBBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export type FigureUseMode = "image" | "text";
+export type FigurePlacement = "own_slide" | "on_slide";
+
+export interface FigureView {
+  id: string;
+  description: string;
+  belongs_to?: string | null;
+  diagram_type?: string | null;
+  bbox?: FigureBBox | null;
+  position?: string | null;
+  label: string;
+  use_mode: FigureUseMode;
+  source: "ai" | "manual";
+  has_crop: boolean;
+  included: boolean;
+  placement: FigurePlacement;
+  rev: number;
+}
+
 export interface PageExtractionView {
   page_number: number;
   status: PageStatus;
@@ -98,6 +124,7 @@ export interface PageExtractionView {
   intent_mode: PageIntentMode;
   selected_item_ids: string[];
   page_instruction?: string | null;
+  figures?: FigureView[];
 }
 
 export interface PageIntent {

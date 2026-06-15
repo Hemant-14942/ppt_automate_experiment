@@ -644,6 +644,10 @@ async def _write_slide_async(
             )
             record_usage("writing", response.usage_metadata, model=WRITING_MODEL)
             slide = response.parsed
+            # Carry the source pages through so detected figures can be attached
+            # to the right slide later; never let the LLM inject a figure itself.
+            slide.source_pages = list(payload.my_slide.source_pages or [])
+            slide.figure = None
             limit = _max_bullets_for_layout(slide.layout)
             slide.bullets = slide.bullets[:limit]
             if slide.layout in (TemplateType.theory_slide, TemplateType.theory_table_slide):
@@ -710,7 +714,8 @@ async def _write_slide_async(
                 bullets=bullets,
                 diagram_description=None,
                 speaker_notes="",
-                layout=fallback_layout
+                layout=fallback_layout,
+                source_pages=list(s.source_pages or []),
             )
 
 
@@ -763,7 +768,8 @@ async def write_all_slides_async(
                 bullets=s.key_points[:MAX_BULLETS],
                 diagram_description=None,
                 speaker_notes="",
-                layout=s.template
+                layout=s.template,
+                source_pages=list(s.source_pages or []),
             ))
         else:
             slides.append(result)
@@ -875,6 +881,8 @@ def write_slide(
         response = client.models.generate_content(model=WRITING_MODEL, contents=prompt, config=config)
         record_usage("writing", response.usage_metadata, model=WRITING_MODEL)
         slide = response.parsed
+        slide.source_pages = list(slide_outline.source_pages or [])
+        slide.figure = None
         limit = _max_bullets_for_layout(slide.layout)
         slide.bullets = slide.bullets[:limit]
         if slide.layout in (TemplateType.theory_slide, TemplateType.theory_table_slide):
@@ -892,7 +900,8 @@ def write_slide(
             bullets=bullets,
             diagram_description=None,
             speaker_notes="",
-            layout=slide_outline.template
+            layout=slide_outline.template,
+            source_pages=list(slide_outline.source_pages or []),
         )
 
 

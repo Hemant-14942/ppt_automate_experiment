@@ -54,6 +54,23 @@ class TableBlock(BaseModel):
     column_alignments:  Optional[list[str]] = None
 
 
+class SlideFigure(BaseModel):
+    """
+    A detected diagram / figure / formula to render on a `figure_slide`.
+
+    Built programmatically (NOT by the LLM) from the user's review choices, so a
+    figure reaches the final deck either as the cropped image or as a text
+    description, exactly as the teacher selected.
+    """
+    kind:         str = "image"             # "image" (cropped PNG) | "text"
+    label:        str = ""                  # e.g. "Q.15 · Circuit"
+    belongs_to:   Optional[str] = None      # question/section it illustrates
+    diagram_type: Optional[str] = None
+    image_path:   Optional[str] = None      # absolute path to the cropped PNG
+    description:  Optional[str] = None       # caption / full text (text mode)
+    placement:    str = "own_slide"         # "own_slide" | "on_slide"
+
+
 class SlideContent(BaseModel):
     slide_number:        int
     title:               str
@@ -61,6 +78,19 @@ class SlideContent(BaseModel):
     diagram_description: Optional[str] = None
     speaker_notes:       str
     layout:              TemplateType
+
+    # Which source PDF pages this slide came from. Threaded from the plan so a
+    # detected figure can be attached to the slide(s) built from its page. The
+    # LLM never fills this — the writer sets it after parsing.
+    source_pages:        list[int] = []
+
+    # Set ONLY on companion `figure_slide`s (built programmatically). Reset to
+    # None on every LLM-written slide so the model can never inject one.
+    figure:              Optional[SlideFigure] = None
+
+    # Figures the user chose to place ON this slide (alongside the question),
+    # embedded as floating pictures after the template content is filled.
+    inline_figures:      list[SlideFigure] = []
 
     # ── passage_slide (cloze / reading-comprehension) only ───────────────────
     directions:          Optional[str] = None

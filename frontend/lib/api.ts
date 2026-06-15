@@ -119,6 +119,93 @@ export function getPageImageURL(sessionId: string, page: number): string {
   return `${BASE_URL}/api/session/${sessionId}/page-image/${page}`;
 }
 
+/** Cropped PNG of a detected diagram region (for the Diagrams review tab).
+ *  `rev` busts the browser cache after the box is re-adjusted. */
+export function getFigureCropURL(
+  sessionId: string,
+  page: number,
+  figureId: string,
+  rev: number = 0
+): string {
+  return `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+    figureId
+  )}/crop?v=${rev}`;
+}
+
+export interface FigureBBoxInput {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Apply user edits (label / question link / image-vs-text / box / placement). */
+export async function updateFigure(
+  sessionId: string,
+  page: number,
+  figureId: string,
+  edits: {
+    label?: string;
+    belongs_to?: string;
+    use_mode?: "image" | "text";
+    included?: boolean;
+    placement?: "own_slide" | "on_slide";
+    bbox?: FigureBBoxInput;
+  }
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+      figureId
+    )}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edits),
+    }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
+/** Manually add a figure (box drawn by the user) the AI missed. */
+export async function addFigure(
+  sessionId: string,
+  page: number,
+  body: {
+    bbox: FigureBBoxInput;
+    label?: string;
+    belongs_to?: string;
+    diagram_type?: string;
+    description?: string;
+    use_mode?: "image" | "text";
+    placement?: "own_slide" | "on_slide";
+  }
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
+/** Permanently delete a figure from a page. */
+export async function deleteFigure(
+  sessionId: string,
+  page: number,
+  figureId: string
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+      figureId
+    )}`,
+    { method: "DELETE" }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
 export async function reExtractPage(
   sessionId: string,
   page: number,

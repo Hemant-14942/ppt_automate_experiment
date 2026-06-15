@@ -29,9 +29,13 @@ from fastapi.responses import Response
 
 from schemas.request import PDFContext, GenerateResponse
 from schemas.slide_plan import FullSlidePlan, SlideOutline, TemplateType
+from schemas.slide_content import SlideContent, SlideFigure
 from schemas.session import (
     PageExtractionView,
     PageItemView,
+    FigureView,
+    FigureUpdateRequest,
+    AddFigureRequest,
     StartSessionResponse,
     ReExtractRequest,
     PageStatusRequest,
@@ -54,6 +58,7 @@ from pipeline.session_store import (
     INTENT_CHOOSE,
 )
 from pipeline.page_items import split_page_items
+from pipeline.image_crop import crop_page_region
 from pipeline.pdf_loader import pdf_to_base64_images
 from agents.extractor import extract_single_page_async, extract_all_pages_async
 from agents.profiler import profile_deck
@@ -160,6 +165,57 @@ def _record_session_analytics(
     return session.analytics
 
 
+_DIAGRAM_TYPE_LABELS = {
+    "circuit": "Circuit", "geometry": "Figure", "graph": "Graph",
+    "formula": "Formula", "flowchart": "Flowchart", "figure": "Figure",
+    "other": "Diagram",
+}
+
+
+def _default_figure_label(belongs_to: str | None, dtype: str | None) -> str:
+    """Build a short, human label like 'Q.15 · Circuit' for a detected figure."""
+    kind = _DIAGRAM_TYPE_LABELS.get((dtype or "").lower(), "Diagram")
+    who = (belongs_to or "").strip()
+    if who and who.lower() not in ("standalone", "theory", "passage"):
+        return f"{who} · {kind}"
+    if who:
+        return f"{who.capitalize()} · {kind}"
+    return kind
+
+
+def _seed_figures_from_extraction(ps: PageState) -> None:
+    """(Re)build ps.figures from the AI extraction's `figures` list."""
+    ex = ps.extraction
+    figs: list[dict] = []
+    for i, f in enumerate(getattr(ex, "figures", None) or []):
+        bbox = None
+        if getattr(f, "bbox", None) is not None:
+            bbox = {"x": f.bbox.x, "y": f.bbox.y, "w": f.bbox.w, "h": f.bbox.h}
+        has_crop = bool(bbox and bbox.get("w", 0) > 0 and bbox.get("h", 0) > 0)
+        figs.append({
+            "id": f"p{ps.page_number}_fig{i}",
+            "description": f.description or "",
+            "belongs_to": f.belongs_to,
+            "diagram_type": f.diagram_type,
+            "bbox": bbox,
+            "position": f.position,
+            "label": _default_figure_label(f.belongs_to, f.diagram_type),
+            # Default to showing the real image when we have a crop, else the
+            # text description (Option A) is the only sensible choice.
+            "use_mode": "image" if has_crop else "text",
+            "source": "ai",
+            "has_crop": has_crop,
+            "included": True,
+            "placement": "own_slide",
+            "rev": 0,
+        })
+    ps.figures = figs
+
+
+def _figure_views(ps: PageState) -> list[FigureView]:
+    return [FigureView(**f) for f in (ps.figures or [])]
+
+
 def _page_view(ps: PageState) -> PageExtractionView:
     ex = ps.extraction
     if ex is None:
@@ -173,6 +229,7 @@ def _page_view(ps: PageState) -> PageExtractionView:
             intent_mode=ps.intent_mode,
             selected_item_ids=list(ps.selected_item_ids),
             page_instruction=ps.page_instruction,
+            figures=_figure_views(ps),
         )
     ct = ex.content_type.value if hasattr(ex.content_type, "value") else str(ex.content_type)
     items = split_page_items(ps.page_number, ex.main_text)
@@ -194,6 +251,7 @@ def _page_view(ps: PageState) -> PageExtractionView:
         intent_mode=ps.intent_mode,
         selected_item_ids=list(ps.selected_item_ids),
         page_instruction=ps.page_instruction,
+        figures=_figure_views(ps),
     )
 
 
@@ -269,6 +327,8 @@ async def start_session(
         # Pre-suggest skip for pages the model flagged blank; user can override.
         if ps.extraction is None:
             ps.status = PAGE_PENDING  # no extraction yet → user reviews/re-extracts
+        else:
+            _seed_figures_from_extraction(ps)
     _record_session_analytics(session, tracker, started, "extraction")
 
     store.put(session)
@@ -315,6 +375,12 @@ async def re_extract_page(session_id: str, page_number: int, body: ReExtractRequ
     # previous per-item selection — reset to "include all" for a clean review.
     ps.intent_mode = INTENT_ALL
     ps.selected_item_ids = []
+    # Figures are re-derived from the fresh extraction (drops stale user edits
+    # for this page, which is correct — the page content just changed).
+    if result is not None:
+        _seed_figures_from_extraction(ps)
+    else:
+        ps.figures = []
     _record_session_analytics(s, tracker, started, "re-extraction")
     s.touch()
     return _page_view(ps)
@@ -351,6 +417,262 @@ async def set_page_intent(session_id: str, page_number: int, body: PageIntentReq
     ps.page_instruction = instruction or None
     s.touch()
     return _page_view(ps)
+
+
+# ── 4c. diagrams / figures — crop preview + user edits ───────────────────────
+
+def _find_figure(ps: PageState, figure_id: str) -> dict:
+    for f in ps.figures or []:
+        if f.get("id") == figure_id:
+            return f
+    raise HTTPException(status_code=404, detail="Figure not found")
+
+
+@router.get("/{session_id}/page/{page_number}/figure/{figure_id}/crop")
+async def figure_crop(session_id: str, page_number: int, figure_id: str):
+    """Return the cropped diagram region as a PNG for the review UI preview."""
+    s = _require(session_id)
+    ps = s.pages.get(page_number)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    fig = _find_figure(ps, figure_id)
+    png = await asyncio.to_thread(crop_page_region, ps.base64, fig.get("bbox"))
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.patch(
+    "/{session_id}/page/{page_number}/figure/{figure_id}",
+    response_model=PageExtractionView,
+)
+async def update_figure(
+    session_id: str, page_number: int, figure_id: str, body: FigureUpdateRequest
+):
+    """Apply user edits to one detected figure (label / question link / mode)."""
+    s = _require(session_id)
+    ps = s.pages.get(page_number)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    fig = _find_figure(ps, figure_id)
+
+    if body.label is not None:
+        fig["label"] = body.label.strip()
+    if body.belongs_to is not None:
+        fig["belongs_to"] = body.belongs_to.strip() or None
+    # A bbox edit can enable image mode (now there's a crop), so apply it first.
+    if body.bbox is not None:
+        bb = {"x": body.bbox.x, "y": body.bbox.y, "w": body.bbox.w, "h": body.bbox.h}
+        usable = bb["w"] > 0.5 and bb["h"] > 0.5
+        fig["bbox"] = bb
+        fig["has_crop"] = bool(usable)
+        fig["rev"] = int(fig.get("rev", 0)) + 1  # cache-bust the crop preview
+    if body.use_mode is not None:
+        mode = body.use_mode.strip().lower()
+        if mode not in ("image", "text"):
+            raise HTTPException(status_code=400, detail="use_mode must be 'image' or 'text'")
+        # Can't choose the image if there's no crop to show.
+        if mode == "image" and not fig.get("has_crop"):
+            raise HTTPException(
+                status_code=400,
+                detail="No diagram crop available for this figure; use 'text'.",
+            )
+        fig["use_mode"] = mode
+    if body.included is not None:
+        fig["included"] = bool(body.included)
+    if body.placement is not None:
+        place = body.placement.strip().lower()
+        if place not in ("own_slide", "on_slide"):
+            raise HTTPException(status_code=400, detail="placement must be 'own_slide' or 'on_slide'")
+        fig["placement"] = place
+
+    s.touch()
+    return _page_view(ps)
+
+
+@router.post(
+    "/{session_id}/page/{page_number}/figure",
+    response_model=PageExtractionView,
+)
+async def add_figure(session_id: str, page_number: int, body: AddFigureRequest):
+    """Manually add a figure the AI missed by drawing a box on the page image."""
+    s = _require(session_id)
+    ps = s.pages.get(page_number)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    bb = {"x": body.bbox.x, "y": body.bbox.y, "w": body.bbox.w, "h": body.bbox.h}
+    has_crop = bb["w"] > 0.5 and bb["h"] > 0.5
+    if not has_crop:
+        raise HTTPException(status_code=400, detail="Drawn region is too small")
+
+    # Stable unique id for manual figures on this page.
+    existing = {f.get("id") for f in (ps.figures or [])}
+    k = 0
+    while f"p{page_number}_manual{k}" in existing:
+        k += 1
+    fig_id = f"p{page_number}_manual{k}"
+
+    dtype = (body.diagram_type or "figure").strip().lower()
+    label = (body.label or "").strip() or _default_figure_label(body.belongs_to, dtype)
+    mode = (body.use_mode or "image").strip().lower()
+    if mode not in ("image", "text"):
+        mode = "image"
+    place = (body.placement or "own_slide").strip().lower()
+    if place not in ("own_slide", "on_slide"):
+        place = "own_slide"
+
+    ps.figures.append({
+        "id": fig_id,
+        "description": (body.description or "").strip(),
+        "belongs_to": (body.belongs_to or "").strip() or None,
+        "diagram_type": dtype,
+        "bbox": bb,
+        "position": "standalone",
+        "label": label,
+        "use_mode": mode if has_crop else "text",
+        "source": "manual",
+        "has_crop": has_crop,
+        "included": True,
+        "placement": place,
+        "rev": 0,
+    })
+    s.touch()
+    return _page_view(ps)
+
+
+@router.delete(
+    "/{session_id}/page/{page_number}/figure/{figure_id}",
+    response_model=PageExtractionView,
+)
+async def delete_figure(session_id: str, page_number: int, figure_id: str):
+    """Permanently remove a figure from the page (vs. just excluding it)."""
+    s = _require(session_id)
+    ps = s.pages.get(page_number)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    before = len(ps.figures or [])
+    ps.figures = [f for f in (ps.figures or []) if f.get("id") != figure_id]
+    if len(ps.figures) == before:
+        raise HTTPException(status_code=404, detail="Figure not found")
+    s.touch()
+    return _page_view(ps)
+
+
+# ── figure → slide helpers (used at generation) ──────────────────────────────
+
+def _build_session_figures(session: Session) -> dict[int, list[SlideFigure]]:
+    """
+    Turn each page's INCLUDED figures into SlideFigure objects, cropping the
+    image-mode ones to PNG files on disk. Returns {page_number: [SlideFigure]}.
+    """
+    out: dict[int, list[SlideFigure]] = {}
+    fig_dir = os.path.join(OUTPUT_DIR, "_figures", session.session_id)
+
+    for n in sorted(session.pages):
+        ps = session.pages[n]
+        chosen = [f for f in (ps.figures or []) if f.get("included", True)]
+        if not chosen:
+            continue
+
+        page_figs: list[SlideFigure] = []
+        for f in chosen:
+            label = (f.get("label") or "").strip() or "Diagram"
+            want_image = f.get("use_mode") == "image" and f.get("has_crop")
+            place = f.get("placement", "own_slide")
+            if place not in ("own_slide", "on_slide"):
+                place = "own_slide"
+            sf = SlideFigure(
+                kind="image" if want_image else "text",
+                label=label,
+                belongs_to=f.get("belongs_to"),
+                diagram_type=f.get("diagram_type"),
+                description=f.get("description") or None,
+                placement=place,
+            )
+            if want_image:
+                try:
+                    os.makedirs(fig_dir, exist_ok=True)
+                    path = os.path.join(fig_dir, f"{f['id']}.png")
+                    png = crop_page_region(ps.base64, f.get("bbox"))
+                    with open(path, "wb") as fh:
+                        fh.write(png)
+                    sf.image_path = path
+                except Exception as e:
+                    # Cropping failed — degrade to the text description so the
+                    # figure still reaches the deck instead of vanishing.
+                    print(f"  [session {session.session_id}] crop failed for {f.get('id')}: {e}")
+                    sf.kind = "text"
+                    sf.image_path = None
+            page_figs.append(sf)
+
+        if page_figs:
+            out[n] = page_figs
+    return out
+
+
+def _figure_to_slide(sf: SlideFigure) -> SlideContent:
+    return SlideContent(
+        slide_number=0,  # renumbered after injection
+        title=sf.label or "Diagram",
+        bullets=[],
+        diagram_description=sf.description,
+        speaker_notes=(sf.description or ""),
+        layout=TemplateType.figure_slide,
+        figure=sf,
+    )
+
+
+def _inject_figure_slides(
+    slide_contents: list[SlideContent],
+    page_figures: dict[int, list[SlideFigure]],
+) -> list[SlideContent]:
+    """
+    Place each chosen figure relative to the slide(s) built from its page:
+
+      • placement == "on_slide" → embed on the matched slide (inline_figures).
+      • placement == "own_slide" → a companion `figure_slide` right after it.
+
+    Figures whose page produced no slide always fall back to a companion slide
+    appended at the end. Slides are renumbered afterwards.
+    """
+    if not page_figures:
+        return slide_contents
+
+    # Clear any LLM-produced inline figures (only we attach these).
+    for sc in slide_contents:
+        sc.inline_figures = []
+
+    # Last slide index that references each page.
+    last_idx: dict[int, int] = {}
+    for i, sc in enumerate(slide_contents):
+        for p in (sc.source_pages or []):
+            last_idx[p] = i
+
+    inserts: dict[int, list[SlideContent]] = {}
+    trailing: list[SlideContent] = []
+    for page, figs in page_figures.items():
+        idx = last_idx.get(page)
+        for sf in figs:
+            if idx is not None and sf.placement == "on_slide":
+                slide_contents[idx].inline_figures.append(sf)
+            elif idx is not None:
+                inserts.setdefault(idx, []).append(_figure_to_slide(sf))
+            else:
+                trailing.append(_figure_to_slide(sf))
+
+    new_list: list[SlideContent] = []
+    for i, sc in enumerate(slide_contents):
+        new_list.append(sc)
+        if i in inserts:
+            new_list.extend(inserts[i])
+    new_list.extend(trailing)
+
+    for i, sc in enumerate(new_list, start=1):
+        sc.slide_number = i
+    return new_list
 
 
 # ── 5. build plan ────────────────────────────────────────────────────────────
@@ -574,6 +896,11 @@ async def generate(session_id: str):
     slide_contents, _ = reflow_slides(slide_contents, s.strategy)
     slide_contents, _ = label_continuation_titles(slide_contents)
     slide_contents = auto_fix(slide_contents, run_qc(slide_contents))
+
+    # Inject companion slides for the diagrams/figures the user kept, each placed
+    # right after the question/section it belongs to (image crop or text).
+    page_figures = await asyncio.to_thread(_build_session_figures, s)
+    slide_contents = _inject_figure_slides(slide_contents, page_figures)
 
     output_path = await asyncio.to_thread(
         generate_pptx, slide_contents, context, output_filename, s.strategy

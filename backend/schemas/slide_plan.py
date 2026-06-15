@@ -29,6 +29,12 @@ class TemplateType(str, Enum):
     pyq_grid_slide   = "pyq_grid_slide"     # PYQ MCQ with 2x2 grid
     pyq_question_only= "pyq_question_only"  # PYQ subjective question
 
+    # ── Diagrams / figures ────────────────────────────────────────────────────
+    figure_slide     = "figure_slide"       # a detected diagram/figure/formula —
+                                            # rendered as the cropped image OR a
+                                            # text description, placed right after
+                                            # the question/section it belongs to.
+
     # ── Closing ─────────────────────────────────────────────────────────────
     summary          = "summary"            # key takeaways at end
     homework_slide   = "homework_slide"     # practice / assignment list

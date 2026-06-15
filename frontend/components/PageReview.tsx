@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { PageExtractionView, PageIntentMode } from "@/types";
 import type { ToastType } from "@/components/Toast";
+import DiagramsPanel from "@/components/DiagramsPanel";
+import FigureBoxLayer from "@/components/FigureBoxLayer";
 import {
   getPageImageURL,
   reExtractPage,
   setPageStatus,
   setPageIntent,
+  updateFigure,
+  addFigure,
 } from "@/lib/api";
 import {
   Check,
@@ -30,7 +34,10 @@ import {
   CheckSquare,
   Square,
   MessageSquarePlus,
+  Shapes,
 } from "lucide-react";
+
+type ReviewTab = "text" | "diagrams";
 
 interface PageReviewProps {
   sessionId: string;
@@ -87,10 +94,46 @@ export default function PageReview({
   const [instruction, setInstruction] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [trackedPage, setTrackedPage] = useState<number | null>(null);
+  // Diagrams & formulas tab.
+  const [activeTab, setActiveTab] = useState<ReviewTab>("text");
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [addMode, setAddMode] = useState(false);
+  // Displayed-image rectangle (px, relative to its container) so bounding-box
+  // overlays line up with the object-contain'd page image exactly.
+  const imgElRef = useRef<HTMLImageElement | null>(null);
+  const [imgRect, setImgRect] = useState<{
+    ox: number;
+    oy: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  const measureImg = useCallback((el: HTMLImageElement | null) => {
+    if (!el || !el.naturalWidth || !el.naturalHeight) return;
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    const scale = Math.min(cw / el.naturalWidth, ch / el.naturalHeight);
+    const w = el.naturalWidth * scale;
+    const h = el.naturalHeight * scale;
+    setImgRect({ ox: (cw - w) / 2, oy: (ch - h) / 2, w, h });
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => measureImg(imgElRef.current);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [measureImg]);
+
+  // Re-measure when the diagrams tab opens against an already-loaded image.
+  useEffect(() => {
+    if (activeTab === "diagrams") measureImg(imgElRef.current);
+  }, [activeTab, measureImg]);
 
   const page = pages[idx];
   const items = useMemo(() => page?.items ?? [], [page?.items]);
   const hasItems = items.length > 0;
+  const figures = useMemo(() => page?.figures ?? [], [page?.figures]);
+  const figureCount = figures.length;
 
   // Reset the intent controls when the visible page changes. Adjusting state
   // during render (guarded by a tracked page number) is React's recommended
@@ -109,6 +152,11 @@ export default function PageReview({
     setShowInstBox(Boolean(page.page_instruction));
     setInstBoxText("");
     setExpanded(new Set());
+    setHighlightId(null);
+    setAddMode(false);
+    // Keep the user on a sensible tab: if the new page has no diagrams, the
+    // Diagrams tab would be empty, so fall back to Text.
+    if ((page.figures?.length ?? 0) === 0) setActiveTab("text");
   }
 
   const approvedCount = useMemo(
@@ -137,6 +185,37 @@ export default function PageReview({
     onPagesChange(
       pages.map((p) => (p.page_number === updated.page_number ? updated : p))
     );
+  };
+
+  const handleUpdateBbox = async (
+    figureId: string,
+    box: { x: number; y: number; w: number; h: number }
+  ) => {
+    if (!page) return;
+    try {
+      const updated = await updateFigure(sessionId, page.page_number, figureId, {
+        bbox: box,
+      });
+      replacePage(updated);
+    } catch (e) {
+      notify((e as Error).message || "Could not update region", "error");
+    }
+  };
+
+  const handleAddFigure = async (box: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }) => {
+    if (!page) return;
+    try {
+      const updated = await addFigure(sessionId, page.page_number, { bbox: box });
+      replacePage(updated);
+      notify("Diagram added — label it on the right", "success");
+    } catch (e) {
+      notify((e as Error).message || "Could not add diagram", "error");
+    }
   };
 
   const goto = (i: number) => {
@@ -368,6 +447,43 @@ export default function PageReview({
         ))}
       </div>
 
+      {/* Tabs — Text & questions  |  Diagrams & formulas */}
+      <div className="mb-4 inline-flex items-center gap-1 rounded-xl border border-white/8 bg-white/2 p-1">
+        <button
+          onClick={() => setActiveTab("text")}
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+            activeTab === "text"
+              ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/40"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <FileText className="h-3.5 w-3.5" />
+          Text &amp; questions
+        </button>
+        <button
+          onClick={() => setActiveTab("diagrams")}
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+            activeTab === "diagrams"
+              ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/40"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <Shapes className="h-3.5 w-3.5" />
+          Diagrams &amp; formulas
+          {figureCount > 0 && (
+            <span
+              className={`ml-0.5 rounded-full px-1.5 text-[10px] font-bold tabular-nums ${
+                activeTab === "diagrams"
+                  ? "bg-orange-400/30 text-orange-100"
+                  : "bg-white/8 text-zinc-400"
+              }`}
+            >
+              {figureCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Main split — image left (larger), decision panel right */}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
         {/* Left — page image */}
@@ -381,11 +497,39 @@ export default function PageReview({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               key={page.page_number}
+              ref={(el) => {
+                imgElRef.current = el;
+              }}
+              onLoad={(e) => measureImg(e.currentTarget)}
               src={getPageImageURL(sessionId, page.page_number)}
               alt={`Page ${page.page_number}`}
               className="h-full max-h-[460px] w-full animate-fade-in object-contain sm:max-h-[680px]"
             />
           </button>
+
+          {/* Interactive bounding-box layer for the Diagrams tab */}
+          {activeTab === "diagrams" && imgRect && (
+            <FigureBoxLayer
+              imgRect={imgRect}
+              figures={figures}
+              addMode={addMode}
+              highlightId={highlightId}
+              onHighlight={setHighlightId}
+              onUpdateBbox={handleUpdateBbox}
+              onAddFigure={handleAddFigure}
+              onExitAddMode={() => setAddMode(false)}
+            />
+          )}
+
+          {/* Add-diagram hint while drawing */}
+          {activeTab === "diagrams" && addMode && (
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+              <span className="rounded-full bg-emerald-500/90 px-3 py-1 text-[11px] font-semibold text-[#042016] shadow-lg">
+                Draw a box around the diagram you want to add
+              </span>
+            </div>
+          )}
+
           <div className="pointer-events-none absolute left-3 top-3 flex gap-2">
             <span className="rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-zinc-300 backdrop-blur">
               {CONTENT_LABELS[page.content_type] ?? page.content_type}
@@ -401,7 +545,22 @@ export default function PageReview({
           </span>
         </div>
 
-        {/* Right — decision panel */}
+        {/* Right — diagrams panel (Diagrams tab) */}
+        {activeTab === "diagrams" && (
+          <DiagramsPanel
+            sessionId={sessionId}
+            page={page}
+            onPageUpdate={replacePage}
+            notify={notify}
+            highlightId={highlightId}
+            onHighlight={setHighlightId}
+            addMode={addMode}
+            onToggleAddMode={() => setAddMode((v) => !v)}
+          />
+        )}
+
+        {/* Right — decision panel (Text tab) */}
+        {activeTab === "text" && (
         <div className="flex flex-col rounded-2xl border border-white/8 bg-white/2">
           <div className="flex items-center gap-2 border-b border-white/6 px-4 py-3">
             <Sparkles className="h-4 w-4 text-amber-300" />
@@ -725,6 +884,7 @@ export default function PageReview({
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Nav footer */}
