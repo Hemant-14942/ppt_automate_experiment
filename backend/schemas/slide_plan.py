@@ -1,6 +1,7 @@
 """ Defines the slide plan — how many slides, what template each uses, which pages each"""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
+from uuid import uuid4
 
 
 class TemplateType(str, Enum):
@@ -29,6 +30,12 @@ class TemplateType(str, Enum):
     pyq_grid_slide   = "pyq_grid_slide"     # PYQ MCQ with 2x2 grid
     pyq_question_only= "pyq_question_only"  # PYQ subjective question
 
+    # ── Diagrams / figures ────────────────────────────────────────────────────
+    figure_slide     = "figure_slide"       # a detected diagram/figure/formula —
+                                            # rendered as the cropped image OR a
+                                            # text description, placed right after
+                                            # the question/section it belongs to.
+
     # ── Closing ─────────────────────────────────────────────────────────────
     summary          = "summary"            # key takeaways at end
     homework_slide   = "homework_slide"     # practice / assignment list
@@ -43,6 +50,10 @@ class SlideOutline(BaseModel):
     key_points:      list[str]    # main points planner identified
     include_diagram: bool
     emphasis:        list[str]    # things instructor marked as important
+    # Stable identifier that survives renumbering, reorder and reflow. Auto-generated
+    # at construction so every outline (planner, manual add, rewrite) gets one. Used
+    # as the anchor for explicitly attaching figures to a specific slide.
+    uid:             str = Field(default_factory=lambda: uuid4().hex)
 
 
 class FullSlidePlan(BaseModel):

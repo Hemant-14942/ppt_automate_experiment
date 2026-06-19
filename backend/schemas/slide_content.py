@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator
 from typing import Optional
 from schemas.slide_plan import TemplateType
 from schemas.text_sanitize import restore_symbols, strip_control_chars
+from pipeline.formula_renderer import to_unicode_math
 
 
 _CURRENCY_SWAP_RE = re.compile(
@@ -20,9 +21,20 @@ def _sanitize_slide_text(text: str | None) -> str | None:
     # Word-escaped "_x20B9_" becomes ₹ instead of being deleted.
     t = restore_symbols(text)
     t = strip_control_chars(t)
-    t = _CURRENCY_SWAP_RE.sub(lambda m: f"{m.group(3)}{m.group(1)}{' ' + m.group(2) if m.group(2) else ''}", t)
-    # Tidy "₹ 71.375" → "₹71.375" (symbol hugs the number).
-    t = re.sub(r'([₹$€£])\s+(\d)', r'\1\2', t)
+    # Currency reordering: "71.375 ₹" → "₹71.375".
+    # Skip when text contains formula delimiters ($...$ / $$...$$) — the `$`
+    # inside LaTeX formulas would be misidentified as a dollar-sign currency
+    # symbol, corrupting the delimiter and breaking formula rendering.
+    has_formula = '$$' in t or (t.count('$') >= 2)
+    if not has_formula:
+        t = _CURRENCY_SWAP_RE.sub(
+            lambda m: f"{m.group(3)}{m.group(1)}{' ' + m.group(2) if m.group(2) else ''}",
+            t,
+        )
+        # Tidy "₹ 71.375" → "₹71.375" (symbol hugs the number).
+        t = re.sub(r'([₹€£])\s+(\d)', r'\1\2', t)   # exclude $ to be safe
+    # Convert ASCII math/chemistry notation to Unicode: H2O→H₂O, x^2→x², ->→→
+    t = to_unicode_math(t)
     return t.strip()
 
 
@@ -54,6 +66,29 @@ class TableBlock(BaseModel):
     column_alignments:  Optional[list[str]] = None
 
 
+class SlideFigure(BaseModel):
+    """
+    A detected diagram / figure / formula to render on a `figure_slide`.
+
+    Built programmatically (NOT by the LLM) from the user's review choices, so a
+    figure reaches the final deck either as the cropped image or as a text
+    description, exactly as the teacher selected.
+    """
+    kind:         str = "image"             # "image" (cropped PNG) | "text"
+    label:        str = ""                  # e.g. "Q.15 · Circuit"
+    belongs_to:   Optional[str] = None      # question/section it illustrates
+    diagram_type: Optional[str] = None
+    image_path:   Optional[str] = None      # absolute path to the cropped PNG
+    description:  Optional[str] = None       # caption / full text (text mode)
+    placement:    str = "own_slide"         # "own_slide" | "on_slide"
+    size:         str = "medium"            # "small" | "medium" | "large"
+    align:        str = "right"             # "left" | "center" | "right"
+    # When set, the figure is pinned to the slide whose SlideContent.source_uid
+    # matches this value (explicit per-slide attach), instead of being placed by
+    # page heuristics.
+    attached_uid: Optional[str] = None
+
+
 class SlideContent(BaseModel):
     slide_number:        int
     title:               str
@@ -61,6 +96,24 @@ class SlideContent(BaseModel):
     diagram_description: Optional[str] = None
     speaker_notes:       str
     layout:              TemplateType
+
+    # Which source PDF pages this slide came from. Threaded from the plan so a
+    # detected figure can be attached to the slide(s) built from its page. The
+    # LLM never fills this — the writer sets it after parsing.
+    source_pages:        list[int] = []
+
+    # Stable id of the plan outline this slide was built from (SlideOutline.uid).
+    # Survives reflow: continuation slides copy the parent's source_uid so figures
+    # explicitly attached to a slide land on it regardless of renumbering.
+    source_uid:          str = ""
+
+    # Set ONLY on companion `figure_slide`s (built programmatically). Reset to
+    # None on every LLM-written slide so the model can never inject one.
+    figure:              Optional[SlideFigure] = None
+
+    # Figures the user chose to place ON this slide (alongside the question),
+    # embedded as floating pictures after the template content is filled.
+    inline_figures:      list[SlideFigure] = []
 
     # ── passage_slide (cloze / reading-comprehension) only ───────────────────
     directions:          Optional[str] = None

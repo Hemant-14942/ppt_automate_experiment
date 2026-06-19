@@ -444,12 +444,19 @@ PER-TEMPLATE RULES (apply ONLY the rule for YOUR template below):
           (a) Total Revenue and Total Cost approach (TR-TC)
           (b) Marginal Revenue and Marginal Cost approach (MR-MC)
     - FORMULA FORMATTING: when the source has a formula/equation, make it
-      VISUALLY PROMINENT — dedicate a bullet to the formula itself:
-          -> Formula: P₀ = E(1−b) / (Ke − br)
-      Then follow with substitution and result in separate bullets:
-          -> Substituting: 159.09 = 10(1−b) / (0.08 − 0.12b)
-          -> Result: b = 0.30, so Dividend Payout = 1 − 0.30 = 70%
-      NEVER bury formulas mid-sentence in a long prose paragraph.
+      VISUALLY PROMINENT — dedicate a bullet to the formula itself.
+      Wrap standalone math expressions in $$...$$ so they render as
+      high-quality images on the slide (matplotlib mathtext):
+          -> $$E = mc^2$$
+          -> $$f_0 = 1 / (2 pi sqrt(LC))$$  [use LaTeX: \frac, \sqrt, \pi, \Delta]
+          -> $$\alpha + \beta = -b/a$$
+      For chemistry molecular formulas write them naturally — they are
+      auto-converted to Unicode subscripts (C6H12O6 becomes C6H12O6 displayed nicely):
+          -> Reaction: C6H12O6 + 6O2 -> 6CO2 + 6H2O
+      For partial formulas mixed with text, use inline $...$:
+          -> The speed of light: $c = 3 \times 10^8$ m/s
+      NEVER bury formulas mid-sentence without delimiters.
+      NEVER use $$...$$ for chemistry with subscripts — write those plain.
     - SOLUTION SLIDES: if this slide presents a worked-out SOLUTION, structure
       it as step-by-step working, NOT as descriptive prose:
           ✓  -> Formula: Cost = Annual Outflow × PVAF
@@ -644,6 +651,10 @@ async def _write_slide_async(
             )
             record_usage("writing", response.usage_metadata, model=WRITING_MODEL)
             slide = response.parsed
+            # Carry the source pages through so detected figures can be attached
+            # to the right slide later; never let the LLM inject a figure itself.
+            slide.source_pages = list(payload.my_slide.source_pages or [])
+            slide.figure = None
             limit = _max_bullets_for_layout(slide.layout)
             slide.bullets = slide.bullets[:limit]
             if slide.layout in (TemplateType.theory_slide, TemplateType.theory_table_slide):
@@ -710,7 +721,8 @@ async def _write_slide_async(
                 bullets=bullets,
                 diagram_description=None,
                 speaker_notes="",
-                layout=fallback_layout
+                layout=fallback_layout,
+                source_pages=list(s.source_pages or []),
             )
 
 
@@ -763,7 +775,8 @@ async def write_all_slides_async(
                 bullets=s.key_points[:MAX_BULLETS],
                 diagram_description=None,
                 speaker_notes="",
-                layout=s.template
+                layout=s.template,
+                source_pages=list(s.source_pages or []),
             ))
         else:
             slides.append(result)
@@ -875,6 +888,8 @@ def write_slide(
         response = client.models.generate_content(model=WRITING_MODEL, contents=prompt, config=config)
         record_usage("writing", response.usage_metadata, model=WRITING_MODEL)
         slide = response.parsed
+        slide.source_pages = list(slide_outline.source_pages or [])
+        slide.figure = None
         limit = _max_bullets_for_layout(slide.layout)
         slide.bullets = slide.bullets[:limit]
         if slide.layout in (TemplateType.theory_slide, TemplateType.theory_table_slide):
@@ -892,7 +907,8 @@ def write_slide(
             bullets=bullets,
             diagram_description=None,
             speaker_notes="",
-            layout=slide_outline.template
+            layout=slide_outline.template,
+            source_pages=list(slide_outline.source_pages or []),
         )
 
 

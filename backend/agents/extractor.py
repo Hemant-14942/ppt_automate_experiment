@@ -189,6 +189,40 @@ This is CRITICAL: tables turned into prose bullets ("the factors are 0.869,
 use `table_slide` and preserve the grid structure.
 
 ═════════════════════════════════════════════════════════════════════════════
+TASK 2b — Detect DIAGRAMS, FIGURES & standalone FORMULAS  →  `figures`
+═════════════════════════════════════════════════════════════════════════════
+
+Many teaching pages carry a VISUAL that the text alone cannot convey — a circuit,
+a geometry figure, a graph, a flow chart, a labelled illustration, or a boxed
+formula. For EACH such visual on the page, add ONE entry to the `figures` list:
+
+  • description  : what the visual shows, in enough detail that a teacher could
+                   redraw it. e.g. "Parallel circuit: 6V battery; Branch-1 = 3Ω
+                   with an ammeter in series; Branch-2 = 6Ω."
+  • belongs_to   : the question / section it illustrates. Use the EXACT question
+                   number if it sits with one ("Q.15"), else "theory", "passage",
+                   or "standalone".
+  • diagram_type : one of  circuit | geometry | graph | formula | flowchart |
+                   figure | other  (best guess).
+  • bbox         : the region of the page the visual occupies, as PERCENTAGES of
+                   the full page, with the TOP-LEFT corner at (x, y) and size
+                   (w, h). All four are numbers from 0 to 100. Example — a diagram
+                   filling the middle-left of the page:
+                       {{"x": 6, "y": 30, "w": 55, "h": 35}}
+                   Estimate as tightly as you can around the visual (do not include
+                   the surrounding question text). An approximate box is fine.
+  • position     : "below_stem" | "above_options" | "standalone" | "inline"
+                   — where it sits relative to the question it belongs to.
+
+RULES:
+  • A standalone, important FORMULA (e.g. a boxed "KE = ½mv²" set apart from the
+    prose) counts as a figure with diagram_type "formula".
+  • Plain inline math inside a sentence is NOT a figure — leave it in main_text.
+  • If the page has NO visual, return an empty `figures` list. Do NOT invent one.
+  • Still describe the same visual in `diagrams_described` (TASK 1) as before —
+    `figures` is the structured, per-visual version used for cropping.
+
+═════════════════════════════════════════════════════════════════════════════
 TASK 3 — Identify EVERY SINGLE visual annotation (CRITICAL — DO NOT MISS ANY)
 ═════════════════════════════════════════════════════════════════════════════
 

@@ -6,6 +6,7 @@ import {
   PageIntent,
   PlanResponse,
   SlideOutlineView,
+  TemplateOption,
 } from "@/types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -119,6 +120,96 @@ export function getPageImageURL(sessionId: string, page: number): string {
   return `${BASE_URL}/api/session/${sessionId}/page-image/${page}`;
 }
 
+/** Cropped PNG of a detected diagram region (for the Diagrams review tab).
+ *  `rev` busts the browser cache after the box is re-adjusted. */
+export function getFigureCropURL(
+  sessionId: string,
+  page: number,
+  figureId: string,
+  rev: number = 0
+): string {
+  return `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+    figureId
+  )}/crop?v=${rev}`;
+}
+
+export interface FigureBBoxInput {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Apply user edits (label / question link / image-vs-text / box / placement). */
+export async function updateFigure(
+  sessionId: string,
+  page: number,
+  figureId: string,
+  edits: {
+    label?: string;
+    belongs_to?: string;
+    use_mode?: "image" | "text";
+    included?: boolean;
+    placement?: "own_slide" | "on_slide";
+    size?: "small" | "medium" | "large";
+    align?: "left" | "center" | "right";
+    attached_slide_uid?: string;
+    bbox?: FigureBBoxInput;
+  }
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+      figureId
+    )}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edits),
+    }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
+/** Manually add a figure (box drawn by the user) the AI missed. */
+export async function addFigure(
+  sessionId: string,
+  page: number,
+  body: {
+    bbox: FigureBBoxInput;
+    label?: string;
+    belongs_to?: string;
+    diagram_type?: string;
+    description?: string;
+    use_mode?: "image" | "text";
+    placement?: "own_slide" | "on_slide";
+  }
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
+/** Permanently delete a figure from a page. */
+export async function deleteFigure(
+  sessionId: string,
+  page: number,
+  figureId: string
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/page/${page}/figure/${encodeURIComponent(
+      figureId
+    )}`,
+    { method: "DELETE" }
+  );
+  return asJson<PageExtractionView>(res);
+}
+
 export async function reExtractPage(
   sessionId: string,
   page: number,
@@ -170,6 +261,14 @@ export async function setPageIntent(
 export async function buildPlan(sessionId: string): Promise<PlanResponse> {
   const res = await fetch(`${BASE_URL}/api/session/${sessionId}/plan`, {
     method: "POST",
+  });
+  return asJson<PlanResponse>(res);
+}
+
+/** Fetch the already-built plan for a session (used by the Slide Studio). */
+export async function getPlan(sessionId: string): Promise<PlanResponse> {
+  const res = await fetch(`${BASE_URL}/api/session/${sessionId}/plan`, {
+    cache: "no-store",
   });
   return asJson<PlanResponse>(res);
 }
@@ -243,10 +342,14 @@ export async function reorderSlides(
 }
 
 export async function generateFromSession(
-  sessionId: string
+  sessionId: string,
+  templateFilename?: string | null,
 ): Promise<GenerateResponse> {
+  const body = templateFilename ? JSON.stringify({ template_filename: templateFilename }) : undefined;
   const res = await fetch(`${BASE_URL}/api/session/${sessionId}/generate`, {
     method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body,
   });
   return asJson<GenerateResponse>(res);
 }
@@ -255,6 +358,30 @@ export async function endSession(sessionId: string): Promise<void> {
   await fetch(`${BASE_URL}/api/session/${sessionId}`, { method: "DELETE" }).catch(
     () => {}
   );
+}
+
+/** Fetch the list of available PPT templates from the backend. */
+export async function fetchTemplates(): Promise<TemplateOption[]> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/templates`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.templates as TemplateOption[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Store the user's chosen template in the session. */
+export async function setSessionTemplate(
+  sessionId: string,
+  filename: string
+): Promise<void> {
+  await fetch(`${BASE_URL}/api/session/${sessionId}/template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename }),
+  });
 }
 
 export async function checkSessionAlive(sessionId: string): Promise<boolean> {

@@ -16,6 +16,30 @@ class PageItemView(BaseModel):
     kind:    str          # "question" | "intro"
 
 
+class FigureView(BaseModel):
+    """A detected diagram/figure/formula on a page, in a UI-friendly shape.
+
+    Seeded from the AI extraction, then user-editable (label, question link,
+    image-vs-text choice). `bbox` is {"x","y","w","h"} in 0-100 percentages.
+    """
+    id:           str
+    description:  str
+    belongs_to:   Optional[str] = None
+    diagram_type: Optional[str] = None
+    bbox:         Optional[dict] = None
+    position:     Optional[str] = None
+    label:        str = ""                 # short user-facing label
+    use_mode:     str = "image"            # "image" (crop) | "text" (description)
+    source:       str = "ai"               # "ai" | "manual"
+    has_crop:     bool = False             # true when a usable bbox exists
+    included:     bool = True              # false = excluded, won't reach the deck
+    placement:    str = "own_slide"        # "own_slide" | "on_slide" (with question)
+    size:         str = "medium"           # "small" | "medium" | "large" render size
+    align:        str = "right"            # "left" | "center" | "right" position
+    attached_slide_uid: Optional[str] = None  # pin to a specific slide (SlideOutline.uid)
+    rev:          int = 0                  # bumps when the bbox changes (cache-bust)
+
+
 class PageExtractionView(BaseModel):
     """A review-friendly projection of one page's extraction for the UI."""
     page_number:        int
@@ -37,6 +61,8 @@ class PageExtractionView(BaseModel):
     intent_mode:        str = "all"               # "all" | "choose"
     selected_item_ids:  list[str] = []
     page_instruction:   Optional[str] = None
+    # Detected diagrams / figures / standalone formulas on this page.
+    figures:            list[FigureView] = []
 
 
 class StartSessionResponse(BaseModel):
@@ -61,12 +87,45 @@ class PageIntentRequest(BaseModel):
     instruction:       Optional[str] = None
 
 
+class FigureBBox(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 0.0
+    h: float = 0.0
+
+
+class FigureUpdateRequest(BaseModel):
+    """User edits to a detected figure (all optional — only sent fields change)."""
+    label:       Optional[str] = None
+    belongs_to:  Optional[str] = None
+    use_mode:    Optional[str] = None       # "image" | "text"
+    included:    Optional[bool] = None      # exclude/include from the deck
+    placement:   Optional[str] = None       # "own_slide" | "on_slide"
+    size:        Optional[str] = None       # "small" | "medium" | "large"
+    align:       Optional[str] = None       # "left" | "center" | "right"
+    # Pin/unpin to a specific slide. "" or null detaches; any other value attaches.
+    attached_slide_uid: Optional[str] = None
+    bbox:        Optional[FigureBBox] = None # user-adjusted crop region (0-100 %)
+
+
+class AddFigureRequest(BaseModel):
+    """Manually add a figure the AI missed, by drawing a box on the page."""
+    bbox:         FigureBBox
+    label:        Optional[str] = None
+    belongs_to:   Optional[str] = None
+    diagram_type: Optional[str] = None
+    description:  Optional[str] = None
+    use_mode:     Optional[str] = None       # defaults to "image"
+    placement:    Optional[str] = None       # defaults to "own_slide"
+
+
 # ── slide plan views ──────────────────────────────────────────────────────────
 
 class SlideOutlineView(BaseModel):
     slide_number:    int
     title:           str
     template:        str
+    uid:             str = ""
     source_pages:    list[int] = []
     key_points:      list[str] = []
     include_diagram: bool = False

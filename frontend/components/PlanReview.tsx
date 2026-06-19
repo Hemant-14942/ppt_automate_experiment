@@ -118,6 +118,9 @@ export default function PlanReview({
   const [adding, setAdding] = useState(false);
   const [addPage, setAddPage] = useState<number>(sourcePages[0] ?? 1);
   const [addNote, setAddNote] = useState("");
+  // Where to insert the new slide. "end" appends; "start" prepends; a number
+  // means "insert right after that slide number". Saves the drag-to-position step.
+  const [addPos, setAddPos] = useState<"end" | "start" | number>("end");
   const [dragNum, setDragNum] = useState<number | null>(null);
   const [overNum, setOverNum] = useState<number | null>(null);
   // Slide number to flash green after a successful edit/rewrite, so the change
@@ -209,14 +212,23 @@ export default function PlanReview({
       const lastNum = plan.slides.length
         ? plan.slides[plan.slides.length - 1].slide_number
         : 0;
+      // Translate the chosen position into the backend's after_slide_number.
+      const afterNum =
+        addPos === "end" ? lastNum : addPos === "start" ? 0 : addPos;
       const updated = await addSlide(sessionId, {
-        after_slide_number: lastNum,
+        after_slide_number: afterNum,
         source_page: addPage,
         feedback: addNote.trim() || undefined,
       });
       onPlanChange(updated);
       setAddNote("");
-      notify(`Added a slide from page ${addPage}`, "success");
+      const where =
+        addPos === "end"
+          ? "at the end"
+          : addPos === "start"
+          ? "at the start"
+          : `after slide ${addPos}`;
+      notify(`Added a slide from page ${addPage} ${where}`, "success");
     } catch (e) {
       notify((e as Error).message || "Could not add slide", "error");
     } finally {
@@ -492,6 +504,25 @@ export default function PlanReview({
               {sourcePages.map((p) => (
                 <option key={p} value={p}>
                   Page {p}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-zinc-500">at</span>
+            <select
+              value={String(addPos)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setAddPos(v === "end" || v === "start" ? v : Number(v));
+              }}
+              title="Choose where the new slide goes — no dragging needed"
+              className="max-w-[200px] rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white outline-none"
+            >
+              <option value="end">End of deck</option>
+              <option value="start">Start of deck</option>
+              {plan.slides.map((s) => (
+                <option key={s.slide_number} value={s.slide_number}>
+                  After {s.slide_number} · {TEMPLATE_LABELS[s.template] ?? s.template}
+                  {s.title ? ` — ${s.title}` : ""}
                 </option>
               ))}
             </select>

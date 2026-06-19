@@ -56,6 +56,12 @@ class PageState:
     intent_mode: str = INTENT_ALL
     selected_item_ids: list[str] = field(default_factory=list)
     page_instruction: Optional[str] = None
+    # Detected diagrams / figures for this page, as user-editable dicts. Seeded
+    # from the AI extraction (extraction.figures) and then mutated by the user
+    # (label, question attachment, image-vs-text choice). Kept as plain dicts so
+    # the in-memory store stays simple and JSON-friendly. See session_routes for
+    # the dict shape and the FigureView it maps to.
+    figures: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +80,9 @@ class Session:
 
     # Populated at generation.
     output_filename: Optional[str] = None
+    # Template chosen by the user in the template-picker step (filename, not full path).
+    # None → falls back to the default Common Template.
+    chosen_template: Optional[str] = None
     # Cumulative TokenTracker.report_dict() data across this multi-request flow.
     analytics: Optional[dict] = None
 

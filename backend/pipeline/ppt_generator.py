@@ -3,18 +3,32 @@ PPT generator — clones slides from the reference template and fills placeholde
 
 Why clone instead of draw from scratch?
   The reference .pptx already has the brand fonts (Anton/Poppins), the colour
-  palette, the canvas size (40 × 22.5 in), and the decorative graphics baked in.
+  palette, the canvas size, and the decorative graphics baked in.
   By cloning a template slide and only replacing the text we get a pixel-perfect
   match for free.
 
 Theory slides are the one exception — the template has no theory layout, so we
 clone the Recap layout (slide 1) and rewrite the big heading text with the
 topic title. The numbered bullet boxes already match what a theory slide needs.
+
+Canvas sizes vary across templates:
+  • Common Template.pptx       — 40 × 22.5 in  (scale = 1.0)
+  • CLAT / Architecture        — 10 × 5.6 in   (scale = 0.25)
+All programmatic drawing coordinates are authored in the 40×22.5 reference space
+and then multiplied by _style().scale before passing to pptx so every template
+renders correctly without per-template branching.
+
+Style extraction:
+  Every template has a style-guide slide as its LAST slot.  parse_template_style()
+  reads that slide automatically so any future template added to reference_ppts/
+  is picked up without touching any Python code.
 """
 import os
 import re
 import copy
 import math
+import threading
+from dataclasses import dataclass, field
 from pptx import Presentation
 from pptx.util import Pt
 from pptx.oxml.ns import qn
@@ -24,11 +38,191 @@ from schemas.slide_content import SlideContent
 from schemas.slide_plan import TemplateType
 from schemas.request import PDFContext
 from config import OUTPUT_DIR, TEMPLATE_PPTX, DEVANAGARI_FONT
+from pipeline.formula_renderer import (
+    split_bullet_segments,
+    is_pure_formula_bullet,
+    render_formula_png,
+    FormulaSegment,
+    TextSegment,
+)
 
 
 # Devanagari block (U+0900–U+097F) — used to detect Hindi text runs that the
 # brand Latin fonts (Anton/Poppins) cannot render.
 _DEVANAGARI_RE = re.compile(r'[\u0900-\u097F]')
+
+
+# ── Template style — read from every template's built-in style-guide slide ────
+#
+# Every reference PPTX has a "style guide" as its LAST slide (slot 13 in the
+# 14-slot ordering).  That slide contains lines like:
+#
+#   Font Type  : Poppins Bold          ← heading / body font
+#   Font Color : #FFCC31               ← brand accent (Cambria Math section)
+#
+# parse_template_style() reads these lines so NO Python changes are needed
+# when a new template is dropped into reference_ppts/.
+#
+# Canvas dimensions are also read from the template so all programmatic
+# drawing auto-scales:
+#   Common Template  40 × 22.5 in  → scale 1.00
+#   CLAT / Arch      10 × 5.60 in  → scale 0.25
+
+
+@dataclass
+class TemplateStyle:
+    """Visual spec extracted from a template's style-guide slide (last slot)."""
+    canvas_w:   float = 40.0     # slide width in inches
+    canvas_h:   float = 22.5     # slide height in inches
+    scale:      float = 1.0      # canvas_w / 40.0
+    accent_hex: str   = "FFCC31" # brand accent (6 hex chars, no '#')
+    body_font:  str   = "Poppins"
+
+
+_STYLE_CACHE: dict[str, TemplateStyle] = {}
+
+
+def parse_template_style(tpl_path: str) -> TemplateStyle:
+    """
+    Open *tpl_path*, read its last slide (style-guide), and return a
+    TemplateStyle with canvas dimensions, accent colour, and body font.
+
+    Results are cached by file path so the PPTX is only parsed once per process.
+    Works automatically for any future template as long as it follows the
+    convention of having its style-guide as the final slide.
+    """
+    if tpl_path in _STYLE_CACHE:
+        return _STYLE_CACHE[tpl_path]
+
+    try:
+        prs = Presentation(tpl_path)
+        canvas_w = prs.slide_width.inches
+        canvas_h = prs.slide_height.inches
+        scale    = canvas_w / 40.0
+
+        # Collect all text from the style-guide slide (always the last one).
+        style_slide = prs.slides[-1]
+        all_text = " ".join(
+            shape.text_frame.text
+            for shape in style_slide.shapes
+            if shape.has_text_frame
+        )
+
+        # Accent colour — style guides have MULTIPLE "Font Color" lines:
+        #   • Normal text sections use "Font Color : #FFFFFF" (white)
+        #   • The Cambria Math / equation section has "Font Color :#XXXX" —
+        #     that's the brand accent colour (gold, amber, orange, etc.)
+        # We look only at shapes whose runs use Cambria Math font.
+        accent_hex = "FFCC31"
+        for shape in style_slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            shape_text = shape.text_frame.text
+            if "Font Color" not in shape_text:
+                continue
+            uses_cambria = any(
+                run.font.name and "Cambria" in (run.font.name or "")
+                for para in shape.text_frame.paragraphs
+                for run in para.runs
+            )
+            if not uses_cambria:
+                continue
+            m = re.search(r'Font\s+Color\s*:\s*#([0-9A-Fa-f]{6})', shape_text)
+            if m:
+                accent_hex = m.group(1).upper()
+                break
+
+        # Body font: first non-Cambria "Font Type : <name>" entry.
+        body_font = "Poppins"
+        for m in re.finditer(r'Font\s+Type\s*:\s*([^\n|]+)', all_text):
+            fname = m.group(1).strip()
+            if "Cambria" not in fname and "Math" not in fname:
+                body_font = fname.split()[0]   # e.g. "Poppins" from "Poppins Bold"
+                break
+
+        style = TemplateStyle(
+            canvas_w=canvas_w, canvas_h=canvas_h, scale=scale,
+            accent_hex=accent_hex, body_font=body_font,
+        )
+        print(
+            f"  [style] {os.path.basename(tpl_path)}: "
+            f"{canvas_w:.1f}×{canvas_h:.1f}in  scale={scale:.3f}  "
+            f"accent=#{accent_hex}  font={body_font}"
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Could not parse template style from %s: %s", tpl_path, exc
+        )
+        style = TemplateStyle()
+
+    _STYLE_CACHE[tpl_path] = style
+    return style
+
+
+# Thread-local variable so that concurrent asyncio.to_thread() generate calls
+# each see their own TemplateStyle without interfering with each other.
+_tl = threading.local()
+_DEFAULT_STYLE = TemplateStyle()
+
+
+def _style() -> TemplateStyle:
+    """Return the TemplateStyle for the current generation thread."""
+    return getattr(_tl, "style", _DEFAULT_STYLE)
+
+
+def _accent_rgb():
+    """Return pptx RGBColor for this thread's accent (default: yellow #FFCC31)."""
+    from pptx.dml.color import RGBColor as _RGB
+    h = _style().accent_hex
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return _RGB(r, g, b)
+
+
+def _insert_formula_image(
+    slide,
+    png_bytes: bytes,
+    left_in: float,
+    top_in: float,
+    max_width_in: float = 30.0,
+    max_height_in: float = 5.0,
+) -> None:
+    """
+    Insert a rendered formula PNG onto the slide as a floating picture shape.
+
+    The image is scaled to fit within (max_width_in × max_height_in) while
+    preserving its aspect ratio. Transparent PNGs look great on the dark slide
+    background.
+    """
+    import io as _io
+    from pptx.util import Inches as _Inches
+
+    # Measure natural size from PNG header via PIL
+    try:
+        from PIL import Image as _PILImage
+        img = _PILImage.open(_io.BytesIO(png_bytes))
+        nat_w_px, nat_h_px = img.size
+    except Exception:
+        nat_w_px, nat_h_px = 800, 200    # safe fallback
+
+    # Scale to fit within bounding box, preserve aspect ratio
+    aspect = nat_w_px / max(nat_h_px, 1)
+    w_in = min(max_width_in, max_height_in * aspect)
+    h_in = w_in / aspect
+    if h_in > max_height_in:
+        h_in = max_height_in
+        w_in = h_in * aspect
+
+    # Centre horizontally
+    centre_in = left_in + max_width_in / 2
+    img_left_in = centre_in - w_in / 2
+
+    img_stream = _io.BytesIO(png_bytes)
+    slide.shapes.add_picture(
+        img_stream,
+        _Inches(img_left_in), _Inches(top_in),
+        width=_Inches(w_in), height=_Inches(h_in),
+    )
 
 
 def _force_run_font(run, name: str) -> None:
@@ -76,10 +270,11 @@ def _apply_devanagari_fonts(slide) -> None:
 # Decorative icons placed by layout. Each lives in backend/assets/visuals/.
 _ASSETS_DIR   = os.path.dirname(os.path.dirname(TEMPLATE_PPTX))
 _VISUALS_DIR  = os.path.join(_ASSETS_DIR, "visuals")
-_TOPIC_ICON_PATH   = os.path.join(_VISUALS_DIR, "topic-heading.png")   # topics agenda
-_THEORY_ICON_PATH  = os.path.join(_VISUALS_DIR, "slide-heading.png")   # theory/content
-_SUMMARY_ICON_PATH = os.path.join(_VISUALS_DIR, "summary.png")         # summary slide
-_RECAP_ICON_PATH   = os.path.join(_VISUALS_DIR, "recap.png")           # recap slide
+# recap.png is placed as a bottom-banner on programmatic summary slides
+# (summary slides clone the blank dark, so they have no template illustration).
+# The other visuals-folder icons (topic-heading, slide-heading, summary) are no
+# longer added programmatically — template decorations come through via cloning.
+_RECAP_ICON_PATH   = os.path.join(_VISUALS_DIR, "recap.png")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,6 +314,7 @@ LAYOUT_TO_TEMPLATE_IDX = {
     TemplateType.summary:           10,
     TemplateType.homework_slide:    11,
     TemplateType.thank_you_slide:   12,
+    TemplateType.figure_slide:       3,   # blank dark slide — we draw tag + image/text
 }
 
 
@@ -351,77 +547,12 @@ def _apply_heading_style(
 # Explicit logo cleanup
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PW_BADGE_PATH = os.path.join(os.path.dirname(TEMPLATE_PPTX), "pw_badge_top_right.png")
-
-
-def _remove_explicit_top_left_logo(slide) -> None:
-    """
-    Remove the explicit top-left PW logo cluster (white circle + PW picture).
-
-    Body-slide templates already carry the desired branding in their cloned
-    artwork/background, so adding or keeping this extra top-left cluster makes
-    them diverge from the reference template. We keep the explicit logo only on
-    heading-style slides; all other layouts should match the body templates.
-    """
-    from pptx.enum.shapes import MSO_SHAPE_TYPE
-
-    CIRCLE_LEFT = int(1.08 * 914400)
-    CIRCLE_TOP  = int(1.00 * 914400)
-    PIC_LEFT    = int(1.82 * 914400)
-    PIC_TOP     = int(1.65 * 914400)
-    POS_TOL     = int(0.35 * 914400)
-    MAX_LOGO_W  = int(5.0  * 914400)
-
-    for shape in list(slide.shapes):
-        try:
-            sw, sl, st_ = shape.width, shape.left, shape.top
-        except (TypeError, AttributeError):
-            continue
-        if sw is None or sl is None or st_ is None or sw >= MAX_LOGO_W:
-            continue
-
-        is_circle = (
-            shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE and
-            abs(sl - CIRCLE_LEFT) < POS_TOL and
-            abs(st_ - CIRCLE_TOP) < POS_TOL
-        )
-        is_picture = (
-            shape.shape_type == MSO_SHAPE_TYPE.PICTURE and
-            abs(sl - PIC_LEFT) < POS_TOL and
-            abs(st_ - PIC_TOP) < POS_TOL
-        )
-        if is_circle or is_picture:
-            sp = shape._element
-            sp.getparent().remove(sp)
-
-
-def _add_top_right_badge(slide) -> None:
-    """
-    Add the supplied PW badge image at a fixed top-right position on the slide.
-
-    This is the user-approved branding element to use across all generated
-    slides, replacing the old top-left explicit logo cluster.
-    """
-    from pptx.util import Inches
-
-    if not os.path.exists(_PW_BADGE_PATH):
-        return
-
-    # Avoid duplicate insertion if a slide gets processed twice.
-    for shape in slide.shapes:
-        try:
-            l, t, w = shape.left, shape.top, shape.width
-        except Exception:
-            continue
-        if abs(l - Inches(36.6)) < Inches(0.25) and abs(t - Inches(0.20)) < Inches(0.25):
-            return
-
-    slide.shapes.add_picture(
-        _PW_BADGE_PATH,
-        Inches(36.6),
-        Inches(0.20),
-        width=Inches(2.30),
-    )
+# pw_badge_top_right.png and the old _add_top_right_badge / _remove_explicit_top_left_logo
+# functions have been removed.  Every reference template already has the PW badge
+# embedded in its slides; the clone operation brings it across automatically.
+# Adding it again from a PNG file produced duplicate badges (the duplicate-check
+# tolerance was smaller than the positional offset between template badge and the
+# programmatic position, so the check silently failed).
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -457,74 +588,6 @@ def _strip_option_prefix(text: str) -> str:
         if t.startswith(pfx):
             return t[len(pfx):].strip()
     return t
-
-
-def _add_heading_icon(slide, heading_shape, sub_shape, icon_path,
-                      icon_height: float = 2.6) -> float:
-    """
-    Place a decorative icon in the far-left margin, vertically aligned to the
-    big heading word, then shift the heading right so the icon and the text
-    never overlap. The icon's aspect ratio is read from the file so wide images
-    (e.g. a "RECAP" wordmark) are never squished.
-
-    Returns the max width (inches) the heading text may now use, so the caller's
-    width-fit keeps the big word clear of the sub-heading box.
-    """
-    from pptx.util import Inches
-
-    DEFAULT_MAX_W = 9.0
-    if heading_shape is None or not os.path.exists(icon_path):
-        return DEFAULT_MAX_W
-
-    # Preserve the icon's real aspect ratio.
-    aspect = 1.0
-    try:
-        from PIL import Image
-        with Image.open(icon_path) as im:
-            aspect = im.size[0] / im.size[1]
-    except Exception:
-        aspect = 1.0
-    icon_w = icon_height * aspect
-
-    ICON_LEFT = 0.7          # far-left margin
-    GAP       = 0.55         # breathing room between icon and text
-
-    heading_top_in = (heading_shape.top or 0) / 914400.0
-    orig_left_in   = (heading_shape.left or 0) / 914400.0
-    # Top-anchored heading text sits a touch below the box top; nudge the icon
-    # down so it visually aligns with the heading glyphs.
-    icon_top = heading_top_in + 0.20
-
-    slide.shapes.add_picture(
-        icon_path,
-        Inches(ICON_LEFT),
-        Inches(icon_top),
-        width=Inches(icon_w),
-        height=Inches(icon_height),
-    )
-
-    # Shift the heading right so it clears the icon, and slide the sub-heading
-    # box by the SAME delta. The template intentionally overlaps the big and
-    # sub boxes, so moving only the big word would push it on top of the sub
-    # word — moving both keeps their original relationship intact.
-    new_left = ICON_LEFT + icon_w + GAP
-    delta = new_left - orig_left_in
-    heading_shape.left = Inches(new_left)
-
-    orig_sub_left = (sub_shape.left / 914400.0) if sub_shape is not None else 12.3
-    if sub_shape is not None and delta > 0:
-        sub_shape.left = Inches(orig_sub_left + delta)
-
-    # Vertically centre the heading text on the icon: match the heading box to
-    # the icon's vertical span and middle-anchor it, so the single title line
-    # sits at the icon's mid-height instead of starting from the top.
-    from pptx.enum.text import MSO_ANCHOR
-    heading_shape.top = Inches(icon_top)
-    heading_shape.height = Inches(icon_height)
-    heading_shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-
-    # Usable width for the big word == its original budget (group moved as one).
-    return max(orig_sub_left - orig_left_in - 0.3, 4.0)
 
 
 def _fill_recap_or_topics(slide, content: SlideContent):
@@ -569,26 +632,18 @@ def _fill_recap_or_topics(slide, content: SlideContent):
             sub_set = True
             sub_shape = shape
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    YELLOW = _accent_rgb()  # template accent colour
     base_big = _resolve_font_pt(heading_shape, 90) if heading_shape else 90
     base_small = _resolve_font_pt(sub_shape, 40) if sub_shape else 40
 
-    # Topics & recap slides get a decorative icon on the LEFT of the heading.
-    # Placing it shifts the heading right (the sub box, now empty, follows).
-    heading_max_w = 9.0
-    if content.layout == TemplateType.topics_slide:
-        _add_heading_icon(
-            slide, heading_shape, sub_shape, _TOPIC_ICON_PATH, icon_height=2.6
-        )
-    elif content.layout == TemplateType.recap_slide:
-        _add_heading_icon(
-            slide, heading_shape, sub_shape, _RECAP_ICON_PATH, icon_height=2.0
-        )
+    # Note: no programmatic icon is added here.  Recap/Topics slides (indexes 0/1)
+    # already carry all decorative artwork from the reference template — the clone
+    # brings it across automatically.  Adding extra icons from the visuals folder
+    # would double-up the decoration and break template-specific styling.
 
     # The whole title now lives in the heading box on one line. Give it a wide
-    # budget from its (possibly icon-shifted) left edge up to a safe right limit
-    # that stays clear of the right-side decorative art, and widen the box so it
-    # never wraps.
+    # budget up to a safe right limit that stays clear of the right-side artwork,
+    # and widen the box so it never wraps.
     from pptx.util import Inches
     RIGHT_LIMIT = 20.0
     heading_left_in = (heading_shape.left or 0) / 914400.0 if heading_shape else 1.63
@@ -703,7 +758,7 @@ def _fill_section_heading(slide, content: SlideContent):
     text = (content.title or "").strip()
     _replace_first(slide, "Type Heading Here", text)
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    YELLOW = _accent_rgb()  # template accent colour
 
     target_shape = None
     for shape in slide.shapes:
@@ -720,12 +775,13 @@ def _fill_section_heading(slide, content: SlideContent):
     base_pt = _resolve_font_pt(target_shape, 84)
     text_len = max(len(text), 1)
 
+    sc = _style().scale
     # Conservative glyph width — LibreOffice substitutes a wider bold sans for
     # the brand font on export, so text renders longer than a naive estimate.
     CHAR_W = 0.0115
-    EDGE_PAD_IN = 1.1         # clearance from the pill's rounded ends
-    RIGHT_BOUND_IN = 35.4     # keep clear of the top-right PW badge (~36.6in)
-    _ABS_MIN_TITLE_PT = 36    # last-resort floor
+    EDGE_PAD_IN = 1.1 * sc              # clearance from the pill's rounded ends
+    RIGHT_BOUND_IN = 35.4 * sc          # keep clear of the top-right PW badge
+    _ABS_MIN_TITLE_PT = max(int(36 * sc), 8)   # last-resort readable floor
 
     tb_top_in = target_shape.top / 914400
     tb_h_in   = target_shape.height / 914400
@@ -779,40 +835,10 @@ def _fill_section_heading(slide, content: SlideContent):
             run.font.size = Pt(chosen_pt)
             run.font.color.rgb = YELLOW
 
-    # Decorative icon INSIDE the blue pill, on the LEFT of the heading text.
-    # The pill is widened to the right to make room (clamped to the badge bound)
-    # so the title keeps its space, and the text is re-centred to the icon's
-    # right.
-    if os.path.exists(_THEORY_ICON_PATH):
-        aspect = 1.0
-        try:
-            from PIL import Image
-            with Image.open(_THEORY_ICON_PATH) as im:
-                aspect = im.size[0] / im.size[1]
-        except Exception:
-            pass
-
-        pad_v  = 0.45
-        icon_h = max(pill_h_in - 2 * pad_v, 0.6)
-        icon_w = icon_h * aspect
-        icon_l = pill_left_in + 0.6
-        icon_t = pill_top_in + (pill_h_in - icon_h) / 2.0
-
-        extended_w = min(new_pill_w + icon_w + 0.5, RIGHT_BOUND_IN - pill_left_in)
-        if pill is not None:
-            pill.width = Inches(extended_w)
-
-        slide.shapes.add_picture(
-            _THEORY_ICON_PATH,
-            Inches(icon_l), Inches(icon_t),
-            width=Inches(icon_w), height=Inches(icon_h),
-        )
-
-        text_left  = icon_l + icon_w + 0.4
-        text_right = pill_left_in + extended_w - EDGE_PAD_IN
-        target_shape.left  = Inches(text_left)
-        target_shape.width = Inches(max(text_right - text_left, 1.0))
-
+    # Note: no programmatic icon is added here.  The section-heading slide (index 2)
+    # already has decorative icons baked into every reference template; they come
+    # through automatically when the slide is cloned, so adding another one from
+    # the visuals folder would double-up the decoration inconsistently.
     _clear_unused_placeholders(slide)
 
 
@@ -904,7 +930,7 @@ def _fill_theory_slide(slide, content: SlideContent, strategy=None):
 
     is_solution = _is_solution_slide(content)
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    YELLOW = _accent_rgb()  # template accent colour
     GREEN  = RGBColor(0x4C, 0xAF, 0x50)
     TAG_BG = GREEN if is_solution else YELLOW
     BLACK  = RGBColor(0x10, 0x10, 0x10)
@@ -912,6 +938,11 @@ def _fill_theory_slide(slide, content: SlideContent, strategy=None):
     TAG_TEXT = WHITE if is_solution else BLACK
 
     sub_re = re.compile(r'^\(\s*([a-dA-D])\s*\)\s*')
+
+    # Canvas scale — 1.0 for Common Template (40×22.5 in), 0.25 for CLAT/Arch (10×5.6 in).
+    # Every Inches() / Pt() call below is already expressed in the 40×22.5 reference
+    # space; multiplying by `sc` maps them onto whatever canvas the chosen template uses.
+    sc = _style().scale
 
     # ── Title — colored tag, auto-sized to text ───────────────────────────────
     raw_title = (content.title or "").strip()
@@ -927,22 +958,15 @@ def _fill_theory_slide(slide, content: SlideContent, strategy=None):
     else:
         title = raw_title.upper() if raw_title else "TOPIC"
 
-    PAD_X = 0.6
-    PAD_Y = 0.20
-    title_pt, tag_w, tag_h = _fit_title_tag(title)
-    tag_l = 1.0
-    tag_t = 0.8
-
-    # Decorative icon to the LEFT of the title tag; shift the tag right to clear it.
-    if os.path.exists(_TOPIC_ICON_PATH):
-        icon_size = tag_h
-        icon_left = 0.8
-        slide.shapes.add_picture(
-            _TOPIC_ICON_PATH,
-            Inches(icon_left), Inches(tag_t),
-            width=Inches(icon_size), height=Inches(icon_size),
-        )
-        tag_l = icon_left + icon_size + 0.4
+    # _fit_title_tag() returns values already scaled to the current canvas.
+    PAD_X = 0.6 * sc
+    PAD_Y = 0.20 * sc
+    title_pt, tag_w, tag_h = _fit_title_tag(title)   # already scaled
+    tag_l = 1.0 * sc
+    tag_t = 0.8 * sc
+    # Note: no programmatic icon is added here.  The template's blank-dark slide
+    # (index 3) has no decorative elements by design; any branding icons on other
+    # slide types come through automatically when that slide is cloned.
 
     tag = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE,
@@ -970,16 +994,22 @@ def _fill_theory_slide(slide, content: SlideContent, strategy=None):
     p.alignment = PP_ALIGN.LEFT
     run = p.add_run()
     run.text = title
-    run.font.size = Pt(title_pt)
+    run.font.size = Pt(title_pt)    # title_pt already scaled by _fit_title_tag
     run.font.bold = True
     run.font.name = "Anton"
     run.font.color.rgb = TAG_TEXT
 
     # ── Body — arrow bullets + optional (a)/(b) sub-bullets ──────────────────
-    body_left = Inches(1.5)
-    body_top = Inches(tag_t + tag_h + 0.9)
-    body_width = Inches(37.0)
-    body_height = Inches(22.5 - (tag_t + tag_h + 0.9) - 1.2)  # leave footer room
+    body_left_in = 1.5 * sc
+    body_top_in  = tag_t + tag_h + 0.9 * sc          # all already scaled
+    body_width_in = 37.0 * sc
+    canvas_h = _style().canvas_h                       # actual canvas height (in)
+    body_height_in = canvas_h - body_top_in - 1.2 * sc   # leave footer room
+
+    body_left   = Inches(body_left_in)
+    body_top    = Inches(body_top_in)
+    body_width  = Inches(body_width_in)
+    body_height = Inches(max(body_height_in, 0.5 * sc))
 
     bullets = [b for b in (content.bullets or []) if b and b.strip()]
     # Drop bullets that are EMPTY once the "-> "/"➤" marker is removed — these
@@ -988,51 +1018,102 @@ def _fill_theory_slide(slide, content: SlideContent, strategy=None):
     if not bullets:
         return
 
-    # Body font size comes from the shared fit engine so the generator and the
-    # reflow/pagination engine always agree on capacity. We use the deck's fixed
-    # pack font (consistent_body_font) — the SAME size reflow used to split this
-    # slide — so EVERY theory slide renders its bullets at an identical, readable
-    # size instead of each slide picking its own "largest that fits".
+    # Body font size: the fit engine returns a size calibrated for the 40×22.5
+    # reference canvas; scale it down proportionally for smaller templates.
     from pipeline.fit_engine import consistent_body_font
-    body_pt = consistent_body_font(TemplateType.theory_slide, strategy)
+    body_pt = max(int(consistent_body_font(TemplateType.theory_slide, strategy) * sc), 6)
+
+    # ── Pre-render formula bullets ────────────────────────────────────────────
+    # Bullets that are pure $$latex$$ blocks are rendered to PNG and inserted
+    # as picture shapes instead of text runs. We track their position index so
+    # we can compute the approximate Y coordinate after the text-frame loop.
+    formula_positions: list[tuple[int, bytes]] = []   # (bullet_index, png_bytes)
+    for bi, raw in enumerate(bullets):
+        if is_pure_formula_bullet(raw):
+            segs = split_bullet_segments(raw)
+            for seg in segs:
+                if isinstance(seg, FormulaSegment):
+                    png = render_formula_png(
+                        seg.latex,
+                        fontsize=int(body_pt * 0.85),
+                        text_color="white",
+                        bg_transparent=True,
+                    )
+                    if png:
+                        formula_positions.append((bi, png))
+                    break   # only one formula per bullet line
 
     body_tb = slide.shapes.add_textbox(body_left, body_top, body_width, body_height)
     bt = body_tb.text_frame
     bt.word_wrap = True
     bt.vertical_anchor = MSO_ANCHOR.TOP
 
+    # Per-bullet height estimate (scaled inches) for Y-offset computation.
+    # body_pt is already scaled, so (body_pt / 72) gives scaled inches directly.
+    space_main_pt = max(int(24 * sc), 4)
+    space_sub_pt  = max(int(14 * sc), 3)
+    sub_pt        = max(body_pt - max(int(4 * sc), 1), 6)
+    _MAIN_BULLET_H = (body_pt * 1.25 + space_main_pt) / 72.0   # scaled inches
+    _SUB_BULLET_H  = (sub_pt  * 1.25 + space_sub_pt)  / 72.0
+    _FORMULA_SLOT_H = 4.0 * sc    # reserved slot for a formula image (scaled in)
+
+    # Cumulative Y tracker (scaled inches, relative to body_top_in)
+    cumulative_y: list[float] = []  # Y start of each bullet
+    y_cursor = 0.0
+
     first = True
-    for raw in bullets:
+    formula_indices = {bi for bi, _ in formula_positions}
+
+    for bi, raw in enumerate(bullets):
+        cumulative_y.append(y_cursor)
+
+        if bi in formula_indices:
+            # Skip: formula bullet — rendered as image below, reserve slot
+            y_cursor += _FORMULA_SLOT_H
+            if first:
+                first = False
+            continue
+
         text = _strip_theory_prefix(raw)
         is_sub = bool(sub_re.match(text))
 
         p = bt.paragraphs[0] if first else bt.add_paragraph()
         first = False
         p.alignment = PP_ALIGN.LEFT
-        p.space_after = Pt(14 if is_sub else 24)   # set BEFORE bullet/indent props
+        p.space_after = Pt(space_sub_pt if is_sub else space_main_pt)
 
-        # Hanging-indent width scales with the font. The canvas is 40in wide, so
-        # the indent must be sizeable for the arrow→text gap and the wrapped-line
-        # alignment to read clearly (a small 0.5in indent is invisible here).
-        main_indent = round(body_pt * 0.020, 2)      # ≈ 0.9in @44pt … 1.1in @56pt
+        # Hanging-indent: proportional to font size so arrow→text gap is
+        # readable at any canvas scale.
+        main_indent = round(body_pt * 0.020, 3)   # naturally scaled via body_pt
 
         if is_sub:
-            # Sub-bullet "(a) …": indented deeper, no arrow glyph; its own hanging
-            # indent so a wrapped sub-line aligns under the sub-bullet text.
-            _set_plain_hanging(p, main_indent + 0.7, 0.55)
+            _set_plain_hanging(p, main_indent + 0.7 * sc, 0.55 * sc)
             run_t = p.add_run()
             run_t.text = text
-            run_t.font.size = Pt(max(body_pt - 4, 22))
+            run_t.font.size = Pt(sub_pt)
             run_t.font.name = "Poppins"
             run_t.font.color.rgb = WHITE
+            y_cursor += _SUB_BULLET_H
         else:
-            # Native ➤ bullet (yellow) + hanging indent → wrapped lines align.
-            _set_arrow_bullet(p, main_indent, color_hex="FFCC31")
+            _set_arrow_bullet(p, main_indent, color_hex=_style().accent_hex)
             run_t = p.add_run()
             run_t.text = text
             run_t.font.size = Pt(body_pt)
             run_t.font.name = "Poppins"
             run_t.font.color.rgb = YELLOW
+            y_cursor += _MAIN_BULLET_H
+
+    # ── Insert formula images at their estimated Y positions ─────────────────
+    for bi, png_bytes in formula_positions:
+        slot_top = body_top_in + cumulative_y[bi]
+        _insert_formula_image(
+            slide,
+            png_bytes,
+            left_in=body_left_in,
+            top_in=slot_top,
+            max_width_in=36.0 * sc,
+            max_height_in=max(_FORMULA_SLOT_H - 0.4 * sc, 0.2),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1044,40 +1125,41 @@ def _fit_title_tag(title: str) -> tuple[int, float, float]:
     Pick (font_pt, tag_width_in, tag_height_in) so the title NEVER overflows
     its rounded-rect background.
 
-    Two prior bugs caused overflow:
-      • char-width was under-estimated (0.012), but LibreOffice substitutes the
-        Anton display font with a WIDER bold sans, so real text ran longer.
-      • tag width was clipped at 26in even when the title needed more — so a
-        long heading spilled past the colored pill.
+    All returned values are **already scaled** to the current template's canvas
+    (via _style().scale), so callers pass them directly to Pt() / Inches() with
+    no further multiplication.
 
-    Fix: use a conservative char-width, allow the pill to grow up to a hard
-    right-edge bound (keeping clear of the top-right PW badge at ~36.6in), and
-    only then step the font down. The pill is always sized to contain the text.
+    Reference sizes (scale = 1.0, i.e. Common Template 40×22.5 in):
+      PAD_X = 0.6 in, PAD_Y = 0.20 in, USABLE_MAX_W = 33 in,
+      title_pt candidates: 54 → 48 → 42 → 36 → 32 → 28 pt (fixed baseline).
 
-    CONSISTENCY: every title starts from the same TARGET size (not the old 72pt
-    "as big as it fits"), so the vast majority of headings — which are short —
-    all render at exactly TARGET. We only step the font DOWN for a genuinely
-    long title that would otherwise overflow the pill. This keeps heading sizes
-    uniform across the deck instead of jumping 72 → 64 → 56 per slide.
+    CONSISTENCY: every title starts from the same TARGET size so the vast
+    majority of headings — which are short — all render at exactly TARGET.
+    We only step the font DOWN for a genuinely long title.
     """
-    PAD_X = 0.6
-    PAD_Y = 0.20
-    SAFETY = 0.5
-    USABLE_MAX_W = 33.0          # hard right bound before the PW badge
-    char_w = 0.0135              # conservative for the bold substitute font
+    sc = _style().scale           # e.g. 1.0 for Common, 0.25 for CLAT/Arch
+    PAD_X = 0.6 * sc
+    PAD_Y = 0.20 * sc
+    SAFETY = 0.5 * sc
+    USABLE_MAX_W = 33.0 * sc      # hard right bound before the PW badge
+    char_w = 0.0135               # conservative for the bold substitute font
     budget = USABLE_MAX_W - 2 * PAD_X - SAFETY
 
     n = max(len(title), 1)
     # Fixed target so headings are consistent; only shrink when too long to fit.
-    title_pt = 28
+    title_pt = max(int(28 * sc), 6)
     for candidate_pt in (54, 48, 42, 36, 32, 28):
-        if n * candidate_pt * char_w <= budget:
-            title_pt = candidate_pt
+        scaled_pt = max(int(candidate_pt * sc), 6)
+        if n * scaled_pt * char_w <= budget:
+            title_pt = scaled_pt
             break
 
     text_w_in = n * title_pt * char_w
-    tag_w = max(min(text_w_in + 2 * PAD_X + SAFETY, USABLE_MAX_W), 5.0)
-    tag_h = title_pt / 72.0 + 2 * PAD_Y + 0.35
+    tag_w = max(
+        min(text_w_in + 2 * PAD_X + SAFETY, USABLE_MAX_W),
+        max(5.0 * sc, 1.0),
+    )
+    tag_h = title_pt / 72.0 + 2 * PAD_Y + 0.35 * sc
     return title_pt, tag_w, tag_h
 
 
@@ -1086,14 +1168,19 @@ def _draw_yellow_title_tag(slide, raw_title: str, top_in: float = 0.8,
     """
     Shared helper: draws a rounded-rect title tag at the top of the slide.
     Yellow for normal slides, green for solution slides.
-    Returns the (left, top + height) in inches.
+
+    `top_in` should be passed in the **40×22.5 reference space** (unscaled).
+    Returns (tag_left_in, bottom_in) in the **scaled** canvas space so callers
+    can position the body below the tag correctly.
     """
     from pptx.util import Inches, Pt
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
     from pptx.enum.shapes import MSO_SHAPE
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    sc = _style().scale
+
+    YELLOW = _accent_rgb()
     GREEN  = RGBColor(0x4C, 0xAF, 0x50)
     BLACK  = RGBColor(0x10, 0x10, 0x10)
     WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
@@ -1102,14 +1189,15 @@ def _draw_yellow_title_tag(slide, raw_title: str, top_in: float = 0.8,
 
     title = (raw_title or "TOPIC").strip().upper() or "TOPIC"
 
-    PAD_X = 0.6
-    PAD_Y = 0.20
-    title_pt, tag_w, tag_h = _fit_title_tag(title)
-    tag_l = 1.0
+    PAD_X = 0.6 * sc
+    PAD_Y = 0.20 * sc
+    title_pt, tag_w, tag_h = _fit_title_tag(title)   # already scaled
+    tag_l = 1.0 * sc
+    top_scaled = top_in * sc
 
     tag = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE,
-        Inches(tag_l), Inches(top_in), Inches(tag_w), Inches(tag_h),
+        Inches(tag_l), Inches(top_scaled), Inches(tag_w), Inches(tag_h),
     )
     tag.fill.solid()
     tag.fill.fore_color.rgb = TAG_BG
@@ -1119,9 +1207,6 @@ def _draw_yellow_title_tag(slide, raw_title: str, top_in: float = 0.8,
 
     tf = tag.text_frame
     tf.word_wrap = False
-    # Auto-size the pill to the ACTUAL rendered text so the heading can never
-    # overflow its background, even if the display font renders wider than our
-    # width estimate. LibreOffice honours this when exporting the PDF preview.
     try:
         from pptx.enum.text import MSO_AUTO_SIZE
         tf.auto_size = MSO_AUTO_SIZE.SHAPE_TO_FIT_TEXT
@@ -1141,7 +1226,7 @@ def _draw_yellow_title_tag(slide, raw_title: str, top_in: float = 0.8,
     run.font.name = "Anton"
     run.font.color.rgb = TAG_TEXT
 
-    return tag_l, top_in + tag_h
+    return tag_l, top_scaled + tag_h
 
 
 def _looks_numeric(value: str) -> bool:
@@ -1488,26 +1573,25 @@ def _fill_theory_table_slide(slide, content: SlideContent, strategy=None):
         is_solution=_is_solution_slide(content),
     )
 
-    BODY_LEFT  = 1.5
-    BODY_WIDTH = 37.0
-    BOTTOM_LIMIT = 21.4
+    sc = _style().scale
+    BODY_LEFT    = 1.5 * sc
+    BODY_WIDTH   = 37.0 * sc
+    BOTTOM_LIMIT = 21.4 * sc
 
     # Bullets block — give the bullets a bounded chunk of vertical space so
     # they never crowd the table. With at most 3 bullets at 32pt (after fit),
     # ~3.5in is plenty.
-    bullets_top = body_top + 0.5
-    BULLETS_MAX_H = 5.0    # in inches
-    MIN_TABLE_H  = 6.0     # the table always gets at least this much room
+    bullets_top   = body_top + 0.5 * sc
+    BULLETS_MAX_H = 5.0 * sc
+    MIN_TABLE_H   = 6.0 * sc
 
-    available_after_bullets = BOTTOM_LIMIT - (bullets_top + BULLETS_MAX_H + 0.6)
+    available_after_bullets = BOTTOM_LIMIT - (bullets_top + BULLETS_MAX_H + 0.6 * sc)
     if available_after_bullets < MIN_TABLE_H:
-        # Compress the bullets allowance.
-        BULLETS_MAX_H = max(2.5, BOTTOM_LIMIT - bullets_top - MIN_TABLE_H - 0.6)
+        BULLETS_MAX_H = max(2.5 * sc, BOTTOM_LIMIT - bullets_top - MIN_TABLE_H - 0.6 * sc)
 
     sub_re = re.compile(r'^\(\s*([a-dA-D])\s*\)\s*')
 
-    # Body font for the bullet block — modest so 2-3 bullets fit in BULLETS_MAX_H.
-    bullet_pt = 28 if len(bullets) >= 3 else 32
+    bullet_pt = max(int((28 if len(bullets) >= 3 else 32) * sc), 6)
 
     body_tb = slide.shapes.add_textbox(
         Inches(BODY_LEFT), Inches(bullets_top),
@@ -1524,17 +1608,17 @@ def _fill_theory_table_slide(slide, content: SlideContent, strategy=None):
         p = bt.paragraphs[0] if first else bt.add_paragraph()
         first = False
         p.alignment = PP_ALIGN.LEFT
-        p.space_after = Pt(10 if is_sub else 18)
-        main_indent = round(bullet_pt * 0.020, 2)
+        p.space_after = Pt(max(int((10 if is_sub else 18) * sc), 3))
+        main_indent = round(bullet_pt * 0.020, 3)
         if is_sub:
-            _set_plain_hanging(p, main_indent + 0.7, 0.55)
+            _set_plain_hanging(p, main_indent + 0.7 * sc, 0.55 * sc)
             run_t = p.add_run()
             run_t.text = text
-            run_t.font.size = Pt(max(bullet_pt - 4, 22))
+            run_t.font.size = Pt(max(bullet_pt - max(int(4 * sc), 1), 6))
             run_t.font.name = "Poppins"
             run_t.font.color.rgb = WHITE
         else:
-            _set_arrow_bullet(p, main_indent, color_hex="FFCC31")
+            _set_arrow_bullet(p, main_indent, color_hex=_style().accent_hex)
             run_t = p.add_run()
             run_t.text = text
             run_t.font.size = Pt(bullet_pt)
@@ -1542,7 +1626,7 @@ def _fill_theory_table_slide(slide, content: SlideContent, strategy=None):
             run_t.font.color.rgb = YELLOW
 
     # Table sits below the bullets block.
-    table_top = bullets_top + BULLETS_MAX_H + 0.4
+    table_top = bullets_top + BULLETS_MAX_H + 0.4 * sc
     table_top = _draw_table_caption(
         slide, table_data.caption or "", BODY_LEFT, table_top, BODY_WIDTH,
     )
@@ -1579,7 +1663,7 @@ def _fill_passage_slide(slide, content: SlideContent):
     from pptx.enum.shapes import MSO_SHAPE
     from pipeline.fit_engine import estimate_block_height_in
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    YELLOW = _accent_rgb()  # template accent colour
     BLACK  = RGBColor(0x10, 0x10, 0x10)
     WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
 
@@ -1640,27 +1724,29 @@ def _fill_passage_slide(slide, content: SlideContent):
     if not passage:
         return
 
-    body_left = Inches(1.5)
-    body_top = Inches(band_t + band_h + 0.7)
-    body_width_in = 37.0
-    body_top_in = band_t + band_h + 0.7
-    body_height_in = max(6.0, 22.5 - body_top_in - 1.2)   # leave footer room
+    sc = _style().scale
+    body_width_in  = 37.0 * sc
+    body_top_in    = (band_t + band_h + 0.7 * sc)
+    canvas_h       = _style().canvas_h
+    body_height_in = max(6.0 * sc, canvas_h - body_top_in - 1.2 * sc)
+
+    body_left = Inches(1.5 * sc)
+    body_top  = Inches(body_top_in)
 
     # FILL THE SLIDE like a hand-made deck — not small text clustered at the top:
-    #   1) pick the LARGEST font (big canvas ⇒ up to ~56pt) that still fits;
+    #   1) pick the LARGEST font that still fits (reference range 30–56pt, scaled);
     #   2) spread the lines (line spacing) to use the leftover height;
     #   3) vertically CENTRE so any residual gap is balanced, never all at bottom.
     paras = [ln for ln in passage.split("\n") if ln.strip()] or [passage]
-    pass_pt = 30
-    for pt in range(56, 29, -2):
+    # font range in reference space (40in); scale to current canvas
+    pass_pt = max(int(30 * sc), 6)
+    for pt_ref in range(56, 29, -2):
+        pt = max(int(pt_ref * sc), 6)
         if estimate_block_height_in(paras, pt, body_width_in) <= body_height_in:
             pass_pt = pt
             break
-    else:
-        pass_pt = 30
 
-    # Spread lines to fill the height. line_spacing ≤ 1.3 × (box / natural) keeps
-    # the block from overflowing while expanding it toward the full height.
+    # Spread lines to fill the height.
     natural = estimate_block_height_in(paras, pass_pt, body_width_in)
     line_spacing = 1.3
     if natural > 0:
@@ -1671,13 +1757,13 @@ def _fill_passage_slide(slide, content: SlideContent):
     )
     bt = body_tb.text_frame
     bt.word_wrap = True
-    bt.vertical_anchor = MSO_ANCHOR.MIDDLE   # centre vertically → fills, no top-cluster
+    bt.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     for i, para_text in enumerate(paras):
         p = bt.paragraphs[0] if i == 0 else bt.add_paragraph()
         p.alignment = PP_ALIGN.JUSTIFY
         p.line_spacing = line_spacing
-        p.space_after = Pt(18)
+        p.space_after = Pt(max(int(18 * sc), 3))
         run = p.add_run()
         run.text = para_text
         run.font.size = Pt(pass_pt)
@@ -1725,7 +1811,7 @@ def _fill_title_slide(slide, content: SlideContent, context: PDFContext):
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
 
-    YELLOW = RGBColor(0xFF, 0xCC, 0x31)
+    YELLOW = _accent_rgb()  # template accent colour
     WHITE  = RGBColor(0xFF, 0xFF, 0xFF)
     GRAY   = RGBColor(0xAA, 0xAA, 0xAA)
 
@@ -2349,23 +2435,25 @@ def _add_bullets_textbox(slide, bullets, top_in=6.0, font_pt=40,
     """
     Append a simple bullets textbox below the heading. Used for summary /
     homework where the template only has a small title and no body area.
-    Coordinates are in the template's 40 × 22.5 in canvas.
-    `font_pt` is supplied by the fit engine so the size matches the layout's
-    capacity (the reflow pass has already paginated overflow).
+    All inch coordinates (top_in, left_in, width_in) are given in the 40×22.5
+    reference space and are scaled to the current template's canvas here.
+    `font_pt` is supplied by the fit engine (reference space); it is also scaled.
     """
     from pptx.util import Inches
     from pptx.dml.color import RGBColor
+    sc = _style().scale
     tb = slide.shapes.add_textbox(
-        Inches(left_in), Inches(top_in), Inches(width_in), Inches(15.0)
+        Inches(left_in * sc), Inches(top_in * sc),
+        Inches(width_in * sc), Inches(15.0 * sc),
     )
     tf = tb.text_frame
     tf.word_wrap = True
     for i, line in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.space_after = Pt(18)
+        p.space_after = Pt(max(int(18 * sc), 3))
         run = p.add_run()
         run.text = f"{i + 1}.  {line}"
-        run.font.size = Pt(font_pt)
+        run.font.size = Pt(max(int(font_pt * sc), 6))
         run.font.name = "Poppins"
         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
@@ -2375,13 +2463,14 @@ def _add_summary_illustration(slide, top_after_text: float):
     Place the recap image as a WIDE banner across the BOTTOM of the summary
     slide (about half the slide width), centred horizontally and sitting below
     the last line of text (`top_after_text`) with a margin. Aspect ratio is
-    preserved.
+    preserved.  All coordinates scale with the current template's canvas.
     """
     from pptx.util import Inches
 
     if not os.path.exists(_RECAP_ICON_PATH):
         return
 
+    sc = _style().scale
     aspect = 1.834
     try:
         from PIL import Image
@@ -2390,12 +2479,14 @@ def _add_summary_illustration(slide, top_after_text: float):
     except Exception:
         pass
 
-    SLIDE_W, SLIDE_BOTTOM, MARGIN = 40.0, 21.8, 1.0
-    img_w = 18.0                                     # ~half the slide width
+    SLIDE_W   = _style().canvas_w
+    SLIDE_BOTTOM = _style().canvas_h - 0.7 * sc
+    MARGIN    = 1.0 * sc
+    img_w = 18.0 * sc
     img_h = img_w / aspect
-    img_l = (SLIDE_W - img_w) / 2.0                  # centred horizontally
-    img_t = top_after_text + MARGIN                  # below the last text line
-    img_t = min(img_t, SLIDE_BOTTOM - img_h)         # keep it on the slide
+    img_l = (SLIDE_W - img_w) / 2.0
+    img_t = top_after_text + MARGIN
+    img_t = min(img_t, SLIDE_BOTTOM - img_h)
 
     slide.shapes.add_picture(
         _RECAP_ICON_PATH,
@@ -2433,6 +2524,272 @@ def _set_notes(slide, text):
 # ─────────────────────────────────────────────────────────────────────────────
 # Router — pick the right filler for each layout
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _fill_figure_slide(slide, content: SlideContent):
+    """
+    Render a detected diagram/figure/formula on a blank dark slide.
+
+    Two modes (set by the teacher during review):
+      • image → the cropped PNG, scaled to fit and centred on a white card so a
+                white-background crop reads cleanly on the dark canvas.
+      • text  → the figure's description rendered as large readable text.
+
+    Everything is a normal movable/resizable shape, so the teacher can reposition
+    or delete it in PowerPoint.
+    """
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+
+    sc       = _style().scale
+    canvas_w = _style().canvas_w
+    fig = content.figure
+
+    _clear_unused_placeholders(slide)
+
+    # Title pill at the top (reuses the brand yellow-tag style).
+    title = content.title or (fig.label if fig else "") or "Diagram"
+    try:
+        _draw_yellow_title_tag(slide, title, top_in=0.9)
+    except Exception:
+        pass
+
+    if fig is None:
+        return
+
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    MUTED = RGBColor(0xC9, 0xCC, 0xD3)
+
+    area_top    = 3.4  * sc
+    area_bottom = 20.6 * sc
+    image_done = False
+
+    if fig.kind == "image" and fig.image_path and os.path.exists(fig.image_path):
+        try:
+            from PIL import Image
+            with Image.open(fig.image_path) as im:
+                iw, ih = im.size
+        except Exception:
+            iw, ih = 4, 3
+        iw = max(1, iw); ih = max(1, ih)
+
+        # Reserve room for a caption line under the image. The user's chosen
+        # size scales the max width of the image on its own dedicated slide.
+        _OWN_SIZE_MAXW = {"small": 18.0 * sc, "medium": 26.0 * sc, "large": 34.0 * sc}
+        max_w = _OWN_SIZE_MAXW.get(getattr(fig, "size", "medium"), 26.0 * sc)
+        max_h = (area_bottom - area_top) - 1.6 * sc
+        img_scale = min(max_w / iw, max_h / ih)
+        w = iw * img_scale
+        h = ih * img_scale
+        left = (canvas_w - w) / 2.0
+        top = area_top
+
+        # White card behind the crop (small padding around the image).
+        pad = 0.35 * sc
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(left - pad), Inches(top - pad),
+            Inches(w + 2 * pad), Inches(h + 2 * pad),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = WHITE
+        card.line.color.rgb = RGBColor(0xE2, 0xE4, 0xEA)
+        card.shadow.inherit = False
+        try:
+            card.adjustments[0] = 0.04
+        except Exception:
+            pass
+
+        slide.shapes.add_picture(
+            fig.image_path, Inches(left), Inches(top),
+            width=Inches(w), height=Inches(h),
+        )
+        caption_top = top + h + pad + 0.25 * sc
+        image_done = True
+    else:
+        caption_top = area_top
+
+    # Caption / description text.
+    cap_parts = []
+    if fig.belongs_to:
+        cap_parts.append(str(fig.belongs_to))
+    if fig.description:
+        cap_parts.append(fig.description)
+    caption = "  —  ".join(cap_parts) if image_done else (fig.description or "")
+
+    if caption:
+        box = slide.shapes.add_textbox(
+            Inches(4.0 * sc), Inches(caption_top),
+            Inches(canvas_w - 8.0 * sc),
+            Inches(max(2.0 * sc, area_bottom - caption_top)),
+        )
+        tf = box.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.TOP if image_done else MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = caption
+        # Smaller for an image caption, larger when text IS the content.
+        run.font.size = Pt(max(int(22 * sc), 6) if image_done else max(int(40 * sc), 6))
+        run.font.color.rgb = MUTED if image_done else WHITE
+        run.font.name = "Poppins"
+
+
+# Render size → max box dimension (inches) for figures placed ON a slide.
+_FIG_SIZE_DIM = {"small": 7.5, "medium": 10.5, "large": 13.5}
+
+
+def _draw_figure_card(slide, fig, left: float, top: float, max_w: float, max_h: float) -> None:
+    """
+    Draw ONE figure (image-on-white-card + label, or a text card) fitted inside
+    the box (left, top, max_w, max_h) in inches. Everything is a normal movable
+    shape so the teacher can reposition/resize it in PowerPoint.
+    """
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    label_h = 0.9 if fig.label else 0.0
+    img_zone_h = max_h - label_h
+
+    if fig.kind == "image" and fig.image_path and os.path.exists(fig.image_path):
+        try:
+            from PIL import Image
+            with Image.open(fig.image_path) as im:
+                iw, ih = im.size
+        except Exception:
+            iw, ih = 4, 3
+        iw = max(1, iw); ih = max(1, ih)
+
+        pad = 0.25
+        avail_w = max_w - 2 * pad
+        avail_h = img_zone_h - 2 * pad
+        scale = min(avail_w / iw, avail_h / ih)
+        w = iw * scale
+        h = ih * scale
+        card_w = w + 2 * pad
+        card_x = left + (max_w - card_w) / 2.0
+        card_y = top
+
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(card_x), Inches(card_y),
+            Inches(card_w), Inches(h + 2 * pad),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = WHITE
+        card.line.color.rgb = RGBColor(0xE2, 0xE4, 0xEA)
+        card.shadow.inherit = False
+        try:
+            card.adjustments[0] = 0.05
+        except Exception:
+            pass
+        slide.shapes.add_picture(
+            fig.image_path, Inches(card_x + pad), Inches(card_y + pad),
+            width=Inches(w), height=Inches(h),
+        )
+        if fig.label:
+            chip = slide.shapes.add_textbox(
+                Inches(left), Inches(card_y + h + 2 * pad + 0.1),
+                Inches(max_w), Inches(label_h),
+            )
+            tf = chip.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.CENTER
+            r = p.add_run()
+            r.text = fig.label
+            r.font.size = Pt(16)
+            r.font.color.rgb = RGBColor(0xC9, 0xCC, 0xD3)
+            r.font.name = "Poppins"
+    else:
+        # Text figure — a translucent dark card with the description.
+        text = fig.description or fig.label or ""
+        if not text:
+            return
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(left), Inches(top), Inches(max_w), Inches(max_h),
+        )
+        card.fill.solid()
+        card.fill.fore_color.rgb = RGBColor(0x1A, 0x13, 0x10)
+        card.line.color.rgb = RGBColor(0xFF, 0xCC, 0x31)
+        card.shadow.inherit = False
+        tf = card.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tf.margin_left = Inches(0.4)
+        tf.margin_right = Inches(0.4)
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = text
+        r.font.size = Pt(20)
+        r.font.color.rgb = WHITE
+        r.font.name = "Poppins"
+
+
+def _embed_figures_on_slide(slide, figs) -> None:
+    """
+    Embed one OR MORE figures directly on a content slide (placement == on_slide).
+
+      • 1 figure  → placed per its `align` (left / center / right) at its `size`.
+      • N figures → laid out in a centered horizontal row, each at its `size`,
+                    scaled down together if the row would overflow the canvas.
+
+    Every figure is a normal movable shape so the teacher can fine-tune it.
+    """
+    figs = [f for f in (figs or [])]
+    n = len(figs)
+    if n == 0:
+        return
+
+    sc       = _style().scale
+    CANVAS_W = _style().canvas_w
+    CANVAS_H = _style().canvas_h
+
+    if n == 1:
+        f = figs[0]
+        dim = _FIG_SIZE_DIM.get(getattr(f, "size", "medium"), 10.5) * sc
+        max_w = dim
+        max_h = dim + (0.9 * sc if f.label else 0.0)
+        top = 5.0 * sc
+        align = getattr(f, "align", "right")
+        if align == "left":
+            left = 1.0 * sc
+        elif align == "center":
+            left = (CANVAS_W - max_w) / 2.0
+        else:
+            left = CANVAS_W - max_w - 1.0 * sc
+        _draw_figure_card(slide, f, left, top, max_w, max_h)
+        return
+
+    # Multiple figures — centered horizontal row.
+    dims = [_FIG_SIZE_DIM.get(getattr(f, "size", "medium"), 10.5) * sc for f in figs]
+    gap = 0.8 * sc
+    total = sum(dims) + gap * (n - 1)
+    avail = CANVAS_W - 2.0 * sc
+    if total > avail:
+        shrink = avail / total
+        dims = [d * shrink for d in dims]
+        total = sum(dims) + gap * (n - 1)
+
+    x = (CANVAS_W - total) / 2.0
+    row_h = max(dims) + 0.9 * sc
+    top = (CANVAS_H - row_h) / 2.0 + 1.5 * sc
+    for f, d in zip(figs, dims):
+        _draw_figure_card(slide, f, x, top, d, row_h)
+        x += d + gap
+
+
+def _embed_figure_on_slide(slide, fig) -> None:
+    """Back-compat single-figure wrapper around _embed_figures_on_slide."""
+    _embed_figures_on_slide(slide, [fig])
+
 
 def _apply_content(slide, content: SlideContent, context: PDFContext, strategy=None):
     t = content.layout
@@ -2500,6 +2857,8 @@ def _apply_content(slide, content: SlideContent, context: PDFContext, strategy=N
         _fill_summary_or_homework(slide, content)
     elif t == TemplateType.thank_you_slide:
         _fill_thank_you(slide, content)
+    elif t == TemplateType.figure_slide:
+        _fill_figure_slide(slide, content)
     else:
         _clear_unused_placeholders(slide)
 
@@ -2528,20 +2887,39 @@ def generate_pptx(
     context: PDFContext,
     filename: str = "output.pptx",
     strategy=None,
+    template_path: str | None = None,
 ) -> str:
     """
     Build the final deck by cloning slides from the reference template and
     filling placeholders with our generated content.
+
+    `template_path` overrides the default TEMPLATE_PPTX. All bundled templates
+    share the same 14-slot LAYOUT_TO_TEMPLATE_IDX order, so swapping the file
+    is the only change needed to switch the visual style.
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    if not os.path.exists(TEMPLATE_PPTX):
+    tpl = template_path or TEMPLATE_PPTX
+
+    if not os.path.exists(tpl):
         raise FileNotFoundError(
-            f"Reference template not found: {TEMPLATE_PPTX}. "
-            "Add 'Common Template.pptx' to backend/assets/reference_ppts/."
+            f"Reference template not found: {tpl}. "
+            "Add the template file to backend/assets/reference_ppts/."
         )
 
-    prs = Presentation(TEMPLATE_PPTX)
+    # Parse the style-guide slide of the chosen template so every _fill_*()
+    # function picks up the correct accent colour AND canvas scale for this deck.
+    # parse_template_style() caches results, so subsequent calls are instant.
+    tpl_basename = os.path.basename(tpl)
+    tpl_style = parse_template_style(tpl)
+    _tl.style = tpl_style
+    print(
+        f"  template → {tpl_basename}  "
+        f"({tpl_style.canvas_w:.1f}×{tpl_style.canvas_h:.1f}in  "
+        f"scale={tpl_style.scale:.3f}  accent=#{tpl_style.accent_hex})"
+    )
+
+    prs = Presentation(tpl)
     original_count = len(prs.slides)
 
     for content in all_slide_contents:
@@ -2553,8 +2931,14 @@ def generate_pptx(
         try:
             new_slide = _clone_slide(prs, prs.slides[src_idx])
             _apply_content(new_slide, content, context, strategy)
-            _remove_explicit_top_left_logo(new_slide)
-            _add_top_right_badge(new_slide)
+            # Embed any figures the user pinned ON this slide (placement on_slide),
+            # laid out together (1 = aligned/sized, N = a centered sized row).
+            _inline = getattr(content, "inline_figures", None) or []
+            if _inline:
+                try:
+                    _embed_figures_on_slide(new_slide, _inline)
+                except Exception as fe:
+                    print(f"    Slide {content.slide_number:2d} — inline figures failed: {fe}")
             _apply_devanagari_fonts(new_slide)
 
             print(f"    Slide {content.slide_number:2d} [{content.layout.value:18s}] — "
