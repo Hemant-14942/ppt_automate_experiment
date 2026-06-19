@@ -444,12 +444,19 @@ PER-TEMPLATE RULES (apply ONLY the rule for YOUR template below):
           (a) Total Revenue and Total Cost approach (TR-TC)
           (b) Marginal Revenue and Marginal Cost approach (MR-MC)
     - FORMULA FORMATTING: when the source has a formula/equation, make it
-      VISUALLY PROMINENT — dedicate a bullet to the formula itself:
-          -> Formula: P₀ = E(1−b) / (Ke − br)
-      Then follow with substitution and result in separate bullets:
-          -> Substituting: 159.09 = 10(1−b) / (0.08 − 0.12b)
-          -> Result: b = 0.30, so Dividend Payout = 1 − 0.30 = 70%
-      NEVER bury formulas mid-sentence in a long prose paragraph.
+      VISUALLY PROMINENT — dedicate a bullet to the formula itself.
+      Wrap standalone math expressions in $$...$$ so they render as
+      high-quality images on the slide (matplotlib mathtext):
+          -> $$E = mc^2$$
+          -> $$f_0 = 1 / (2 pi sqrt(LC))$$  [use LaTeX: \frac, \sqrt, \pi, \Delta]
+          -> $$\alpha + \beta = -b/a$$
+      For chemistry molecular formulas write them naturally — they are
+      auto-converted to Unicode subscripts (C6H12O6 becomes C6H12O6 displayed nicely):
+          -> Reaction: C6H12O6 + 6O2 -> 6CO2 + 6H2O
+      For partial formulas mixed with text, use inline $...$:
+          -> The speed of light: $c = 3 \times 10^8$ m/s
+      NEVER bury formulas mid-sentence without delimiters.
+      NEVER use $$...$$ for chemistry with subscripts — write those plain.
     - SOLUTION SLIDES: if this slide presents a worked-out SOLUTION, structure
       it as step-by-step working, NOT as descriptive prose:
           ✓  -> Formula: Cost = Annual Outflow × PVAF

@@ -34,6 +34,9 @@ class FigureView(BaseModel):
     has_crop:     bool = False             # true when a usable bbox exists
     included:     bool = True              # false = excluded, won't reach the deck
     placement:    str = "own_slide"        # "own_slide" | "on_slide" (with question)
+    size:         str = "medium"           # "small" | "medium" | "large" render size
+    align:        str = "right"            # "left" | "center" | "right" position
+    attached_slide_uid: Optional[str] = None  # pin to a specific slide (SlideOutline.uid)
     rev:          int = 0                  # bumps when the bbox changes (cache-bust)
 
 
@@ -98,6 +101,10 @@ class FigureUpdateRequest(BaseModel):
     use_mode:    Optional[str] = None       # "image" | "text"
     included:    Optional[bool] = None      # exclude/include from the deck
     placement:   Optional[str] = None       # "own_slide" | "on_slide"
+    size:        Optional[str] = None       # "small" | "medium" | "large"
+    align:       Optional[str] = None       # "left" | "center" | "right"
+    # Pin/unpin to a specific slide. "" or null detaches; any other value attaches.
+    attached_slide_uid: Optional[str] = None
     bbox:        Optional[FigureBBox] = None # user-adjusted crop region (0-100 %)
 
 
@@ -118,6 +125,7 @@ class SlideOutlineView(BaseModel):
     slide_number:    int
     title:           str
     template:        str
+    uid:             str = ""
     source_pages:    list[int] = []
     key_points:      list[str] = []
     include_diagram: bool = False

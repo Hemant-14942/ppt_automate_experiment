@@ -1,6 +1,7 @@
 """ Defines the slide plan — how many slides, what template each uses, which pages each"""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
+from uuid import uuid4
 
 
 class TemplateType(str, Enum):
@@ -49,6 +50,10 @@ class SlideOutline(BaseModel):
     key_points:      list[str]    # main points planner identified
     include_diagram: bool
     emphasis:        list[str]    # things instructor marked as important
+    # Stable identifier that survives renumbering, reorder and reflow. Auto-generated
+    # at construction so every outline (planner, manual add, rewrite) gets one. Used
+    # as the anchor for explicitly attaching figures to a specific slide.
+    uid:             str = Field(default_factory=lambda: uuid4().hex)
 
 
 class FullSlidePlan(BaseModel):

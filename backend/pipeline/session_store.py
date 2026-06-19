@@ -80,6 +80,9 @@ class Session:
 
     # Populated at generation.
     output_filename: Optional[str] = None
+    # Template chosen by the user in the template-picker step (filename, not full path).
+    # None → falls back to the default Common Template.
+    chosen_template: Optional[str] = None
     # Cumulative TokenTracker.report_dict() data across this multi-request flow.
     analytics: Optional[dict] = None
 

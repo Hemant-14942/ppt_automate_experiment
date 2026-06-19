@@ -6,6 +6,7 @@ import {
   PageIntent,
   PlanResponse,
   SlideOutlineView,
+  TemplateOption,
 } from "@/types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -150,6 +151,9 @@ export async function updateFigure(
     use_mode?: "image" | "text";
     included?: boolean;
     placement?: "own_slide" | "on_slide";
+    size?: "small" | "medium" | "large";
+    align?: "left" | "center" | "right";
+    attached_slide_uid?: string;
     bbox?: FigureBBoxInput;
   }
 ): Promise<PageExtractionView> {
@@ -261,6 +265,14 @@ export async function buildPlan(sessionId: string): Promise<PlanResponse> {
   return asJson<PlanResponse>(res);
 }
 
+/** Fetch the already-built plan for a session (used by the Slide Studio). */
+export async function getPlan(sessionId: string): Promise<PlanResponse> {
+  const res = await fetch(`${BASE_URL}/api/session/${sessionId}/plan`, {
+    cache: "no-store",
+  });
+  return asJson<PlanResponse>(res);
+}
+
 export async function rewriteSlide(
   sessionId: string,
   slide: number,
@@ -330,10 +342,14 @@ export async function reorderSlides(
 }
 
 export async function generateFromSession(
-  sessionId: string
+  sessionId: string,
+  templateFilename?: string | null,
 ): Promise<GenerateResponse> {
+  const body = templateFilename ? JSON.stringify({ template_filename: templateFilename }) : undefined;
   const res = await fetch(`${BASE_URL}/api/session/${sessionId}/generate`, {
     method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body,
   });
   return asJson<GenerateResponse>(res);
 }
@@ -342,6 +358,30 @@ export async function endSession(sessionId: string): Promise<void> {
   await fetch(`${BASE_URL}/api/session/${sessionId}`, { method: "DELETE" }).catch(
     () => {}
   );
+}
+
+/** Fetch the list of available PPT templates from the backend. */
+export async function fetchTemplates(): Promise<TemplateOption[]> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/templates`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.templates as TemplateOption[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Store the user's chosen template in the session. */
+export async function setSessionTemplate(
+  sessionId: string,
+  filename: string
+): Promise<void> {
+  await fetch(`${BASE_URL}/api/session/${sessionId}/template`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename }),
+  });
 }
 
 export async function checkSessionAlive(sessionId: string): Promise<boolean> {

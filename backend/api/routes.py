@@ -14,12 +14,42 @@ from pipeline.pptx_to_pdf import (
     is_available as libreoffice_available,
     LibreOfficeNotInstalled,
 )
-from config import UPLOAD_DIR, OUTPUT_DIR, STORAGE_BACKEND
+from config import UPLOAD_DIR, OUTPUT_DIR, STORAGE_BACKEND, TEMPLATE_PPTX
 import uuid
 from storage.s3_storage import upload_file_to_s3, create_presigned_download_url
 
 
 router = APIRouter()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Template discovery helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REFS_DIR = os.path.dirname(TEMPLATE_PPTX)
+
+# Human-readable display names for the bundled templates.
+_TEMPLATE_DISPLAY_NAMES = {
+    "Common Template.pptx":        "Common",
+    "CLAT_Common_Template_1.pptx": "CLAT Common",
+    "Acchitecture Format.pptx":    "Architecture",
+}
+
+
+def _list_templates() -> list[dict]:
+    """Scan the reference_ppts directory and return template metadata."""
+    templates = []
+    try:
+        for fname in sorted(os.listdir(_REFS_DIR)):
+            if not fname.lower().endswith(".pptx"):
+                continue
+            if fname.endswith(".bak"):
+                continue
+            tid = fname.replace(" ", "_").replace(".pptx", "").lower()
+            display = _TEMPLATE_DISPLAY_NAMES.get(fname, fname.replace(".pptx", ""))
+            templates.append({"id": tid, "name": display, "filename": fname})
+    except Exception:
+        pass
+    return templates
 
 MAX_DRIVE_PDF_BYTES = 50 * 1024 * 1024
 DRIVE_DOWNLOAD_TIMEOUT = 60
@@ -315,3 +345,12 @@ async def health_check():
         "storage_backend": STORAGE_BACKEND,
         "preview_available": libreoffice_available(),
     }
+
+
+@router.get("/templates")
+async def list_templates():
+    """
+    Return the available reference PPT templates the user can choose from.
+    Each item has: id, name, filename.
+    """
+    return {"templates": _list_templates()}

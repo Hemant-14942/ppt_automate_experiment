@@ -26,6 +26,7 @@ import asyncio
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from schemas.request import PDFContext, GenerateResponse
 from schemas.slide_plan import FullSlidePlan, SlideOutline, TemplateType
@@ -69,7 +70,9 @@ from pipeline.fit_engine import reflow_slides, label_continuation_titles
 from pipeline.slide_cleanup import drop_placeholder_slides, dedupe_tables
 from agents.qc_agent import run_qc, auto_fix
 from pipeline.token_tracker import TokenTracker
-from config import UPLOAD_DIR, OUTPUT_DIR, STORAGE_BACKEND
+from config import UPLOAD_DIR, OUTPUT_DIR, STORAGE_BACKEND, TEMPLATE_PPTX
+
+_REFS_DIR = os.path.dirname(TEMPLATE_PPTX)
 
 # Reuse the Drive download + s3 helpers already implemented in routes.py.
 from api.routes import _download_public_drive_pdf
@@ -207,6 +210,9 @@ def _seed_figures_from_extraction(ps: PageState) -> None:
             "has_crop": has_crop,
             "included": True,
             "placement": "own_slide",
+            "size": "medium",
+            "align": "right",
+            "attached_slide_uid": None,
             "rev": 0,
         })
     ps.figures = figs
@@ -260,6 +266,7 @@ def _outline_view(o: SlideOutline, analytics: dict | None = None) -> SlideOutlin
         slide_number=o.slide_number,
         title=o.title,
         template=o.template.value if hasattr(o.template, "value") else str(o.template),
+        uid=getattr(o, "uid", "") or "",
         source_pages=list(o.source_pages or []),
         key_points=list(o.key_points or []),
         include_diagram=bool(o.include_diagram),
@@ -487,6 +494,23 @@ async def update_figure(
         if place not in ("own_slide", "on_slide"):
             raise HTTPException(status_code=400, detail="placement must be 'own_slide' or 'on_slide'")
         fig["placement"] = place
+    if body.size is not None:
+        size = body.size.strip().lower()
+        if size not in ("small", "medium", "large"):
+            raise HTTPException(status_code=400, detail="size must be 'small', 'medium' or 'large'")
+        fig["size"] = size
+    if body.align is not None:
+        align = body.align.strip().lower()
+        if align not in ("left", "center", "right"):
+            raise HTTPException(status_code=400, detail="align must be 'left', 'center' or 'right'")
+        fig["align"] = align
+    if body.attached_slide_uid is not None:
+        uid = body.attached_slide_uid.strip()
+        # Empty string detaches; any non-empty value pins to that slide and the
+        # figure must be included to actually reach the deck.
+        fig["attached_slide_uid"] = uid or None
+        if uid:
+            fig["included"] = True
 
     s.touch()
     return _page_view(ps)
@@ -537,6 +561,9 @@ async def add_figure(session_id: str, page_number: int, body: AddFigureRequest):
         "has_crop": has_crop,
         "included": True,
         "placement": place,
+        "size": "medium",
+        "align": "right",
+        "attached_slide_uid": None,
         "rev": 0,
     })
     s.touch()
@@ -563,12 +590,21 @@ async def delete_figure(session_id: str, page_number: int, figure_id: str):
 
 # ── figure → slide helpers (used at generation) ──────────────────────────────
 
-def _build_session_figures(session: Session) -> dict[int, list[SlideFigure]]:
+def _build_session_figures(
+    session: Session,
+) -> tuple[dict[int, list[SlideFigure]], dict[str, list[SlideFigure]]]:
     """
     Turn each page's INCLUDED figures into SlideFigure objects, cropping the
-    image-mode ones to PNG files on disk. Returns {page_number: [SlideFigure]}.
+    image-mode ones to PNG files on disk.
+
+    Returns (page_figures, uid_figures):
+      • page_figures : {page_number: [SlideFigure]} — placed by page heuristics.
+      • uid_figures  : {slide_uid:   [SlideFigure]} — explicitly pinned by the
+                       user to a specific slide (SlideOutline.uid).
+    A figure pinned to a slide is ONLY in uid_figures, never page_figures.
     """
     out: dict[int, list[SlideFigure]] = {}
+    pinned: dict[str, list[SlideFigure]] = {}
     fig_dir = os.path.join(OUTPUT_DIR, "_figures", session.session_id)
 
     for n in sorted(session.pages):
@@ -584,6 +620,13 @@ def _build_session_figures(session: Session) -> dict[int, list[SlideFigure]]:
             place = f.get("placement", "own_slide")
             if place not in ("own_slide", "on_slide"):
                 place = "own_slide"
+            size = f.get("size", "medium")
+            if size not in ("small", "medium", "large"):
+                size = "medium"
+            align = f.get("align", "right")
+            if align not in ("left", "center", "right"):
+                align = "right"
+            attached_uid = (f.get("attached_slide_uid") or "").strip() or None
             sf = SlideFigure(
                 kind="image" if want_image else "text",
                 label=label,
@@ -591,6 +634,9 @@ def _build_session_figures(session: Session) -> dict[int, list[SlideFigure]]:
                 diagram_type=f.get("diagram_type"),
                 description=f.get("description") or None,
                 placement=place,
+                size=size,
+                align=align,
+                attached_uid=attached_uid,
             )
             if want_image:
                 try:
@@ -606,11 +652,15 @@ def _build_session_figures(session: Session) -> dict[int, list[SlideFigure]]:
                     print(f"  [session {session.session_id}] crop failed for {f.get('id')}: {e}")
                     sf.kind = "text"
                     sf.image_path = None
-            page_figs.append(sf)
+
+            if attached_uid:
+                pinned.setdefault(attached_uid, []).append(sf)
+            else:
+                page_figs.append(sf)
 
         if page_figs:
             out[n] = page_figs
-    return out
+    return out, pinned
 
 
 def _figure_to_slide(sf: SlideFigure) -> SlideContent:
@@ -628,31 +678,63 @@ def _figure_to_slide(sf: SlideFigure) -> SlideContent:
 def _inject_figure_slides(
     slide_contents: list[SlideContent],
     page_figures: dict[int, list[SlideFigure]],
+    uid_figures: dict[str, list[SlideFigure]] | None = None,
 ) -> list[SlideContent]:
     """
-    Place each chosen figure relative to the slide(s) built from its page:
+    Place each chosen figure relative to its target slide:
 
+      • Figures pinned to a slide (uid_figures) go to the exact slide whose
+        source_uid matches — surviving reflow/renumbering.
+      • Other figures are placed by page heuristics (page_figures).
+
+    For each figure:
       • placement == "on_slide" → embed on the matched slide (inline_figures).
       • placement == "own_slide" → a companion `figure_slide` right after it.
 
-    Figures whose page produced no slide always fall back to a companion slide
+    Figures whose target produced no slide fall back to a companion slide
     appended at the end. Slides are renumbered afterwards.
     """
-    if not page_figures:
+    uid_figures = uid_figures or {}
+    if not page_figures and not uid_figures:
         return slide_contents
 
     # Clear any LLM-produced inline figures (only we attach these).
     for sc in slide_contents:
         sc.inline_figures = []
 
-    # Last slide index that references each page.
+    # Last slide index that references each page (page heuristic anchor).
     last_idx: dict[int, int] = {}
     for i, sc in enumerate(slide_contents):
         for p in (sc.source_pages or []):
             last_idx[p] = i
 
+    # First/last slide index for each stable uid. Embedded figures go on the
+    # FIRST slide of a (possibly split) run; companion slides after the LAST.
+    first_uid_idx: dict[str, int] = {}
+    last_uid_idx: dict[str, int] = {}
+    for i, sc in enumerate(slide_contents):
+        u = getattr(sc, "source_uid", "") or ""
+        if not u:
+            continue
+        if u not in first_uid_idx:
+            first_uid_idx[u] = i
+        last_uid_idx[u] = i
+
     inserts: dict[int, list[SlideContent]] = {}
     trailing: list[SlideContent] = []
+
+    # 1) Explicitly pinned figures — anchored by slide uid.
+    for uid, figs in uid_figures.items():
+        for sf in figs:
+            if sf.placement == "on_slide" and uid in first_uid_idx:
+                slide_contents[first_uid_idx[uid]].inline_figures.append(sf)
+            elif uid in last_uid_idx:
+                inserts.setdefault(last_uid_idx[uid], []).append(_figure_to_slide(sf))
+            else:
+                # Target slide no longer exists — keep the figure rather than drop.
+                trailing.append(_figure_to_slide(sf))
+
+    # 2) Page-heuristic figures.
     for page, figs in page_figures.items():
         idx = last_idx.get(page)
         for sf in figs:
@@ -747,6 +829,9 @@ async def rewrite_slide(session_id: str, slide_number: int, body: SlideRewriteRe
     revised = await asyncio.to_thread(
         replan_single_slide, outline, s.curated_pages(), s.context, body.feedback
     )
+    # Keep the stable uid so any figures attached to this slide stay attached
+    # after an AI rewrite (replan returns a fresh outline with a new uid).
+    revised.uid = outline.uid
     # Replace in place.
     idx = s.slide_plan.slides.index(outline)
     s.slide_plan.slides[idx] = revised
@@ -823,12 +908,16 @@ async def add_slide(session_id: str, body: AddSlideRequest):
             print(f"  [session] add-slide AI fill skipped ({e})")
         _record_session_analytics(s, tracker, started, "add-slide AI fill")
 
-    # Insert after the requested slide.
-    insert_at = len(s.slide_plan.slides)
-    for i, o in enumerate(s.slide_plan.slides):
-        if o.slide_number == body.after_slide_number:
-            insert_at = i + 1
-            break
+    # Insert after the requested slide. after_slide_number == 0 means "at the
+    # very start"; an unknown number falls back to appending at the end.
+    if body.after_slide_number <= 0:
+        insert_at = 0
+    else:
+        insert_at = len(s.slide_plan.slides)
+        for i, o in enumerate(s.slide_plan.slides):
+            if o.slide_number == body.after_slide_number:
+                insert_at = i + 1
+                break
     s.slide_plan.slides.insert(insert_at, new_outline)
     _renumber(s)
     s.touch()
@@ -865,10 +954,32 @@ async def reorder_slides(session_id: str, body: ReorderRequest):
     )
 
 
+# ── 10a. set chosen template ─────────────────────────────────────────────────
+
+class TemplateSelectRequest(BaseModel):
+    filename: str  # e.g. "Clat evening format.pptx"
+
+
+@router.post("/{session_id}/template")
+async def set_template(session_id: str, body: TemplateSelectRequest):
+    """Store the user's chosen template filename in the session."""
+    s = _require(session_id)
+    candidate = os.path.join(_REFS_DIR, body.filename)
+    if not os.path.exists(candidate):
+        raise HTTPException(status_code=400, detail=f"Template not found: {body.filename}")
+    s.chosen_template = body.filename
+    s.touch()
+    return {"status": "ok", "chosen_template": body.filename}
+
+
 # ── 10. generate ─────────────────────────────────────────────────────────────
 
+class GenerateRequest(BaseModel):
+    template_filename: str | None = None
+
+
 @router.post("/{session_id}/generate", response_model=GenerateResponse)
-async def generate(session_id: str):
+async def generate(session_id: str, body: GenerateRequest | None = None):
     s = _require(session_id)
     if s.slide_plan is None or not s.slide_plan.slides:
         raise HTTPException(status_code=400, detail="Build and approve a plan first")
@@ -891,6 +1002,14 @@ async def generate(session_id: str):
     slide_contents = await write_all_slides_async(
         s.slide_plan, approved, context, {}, s.strategy
     )
+
+    # Stamp each written slide with its plan outline's stable uid. The writer
+    # keys slides by slide_number (matching the plan), so map back here. This
+    # survives cleanup/reflow (deepcopy) and anchors per-slide figure attach.
+    uid_by_num = {o.slide_number: o.uid for o in s.slide_plan.slides}
+    for sc in slide_contents:
+        sc.source_uid = uid_by_num.get(sc.slide_number, "")
+
     slide_contents, _ = drop_placeholder_slides(slide_contents)
     slide_contents, _ = dedupe_tables(slide_contents)
     slide_contents, _ = reflow_slides(slide_contents, s.strategy)
@@ -899,11 +1018,37 @@ async def generate(session_id: str):
 
     # Inject companion slides for the diagrams/figures the user kept, each placed
     # right after the question/section it belongs to (image crop or text).
-    page_figures = await asyncio.to_thread(_build_session_figures, s)
-    slide_contents = _inject_figure_slides(slide_contents, page_figures)
+    page_figures, uid_figures = await asyncio.to_thread(_build_session_figures, s)
+    slide_contents = _inject_figure_slides(slide_contents, page_figures, uid_figures)
+
+    # Resolve chosen template — body.template_filename takes priority,
+    # then session.chosen_template (set via /template endpoint), else default.
+    tpl_fname = (body.template_filename if body else None) or s.chosen_template
+    chosen_tpl_path: str | None = None
+    if tpl_fname:
+        candidate = os.path.join(_REFS_DIR, tpl_fname)
+        if os.path.exists(candidate):
+            chosen_tpl_path = candidate
+            # Persist to session so re-generates keep the same template
+            s.chosen_template = tpl_fname
+        else:
+            # Template file was requested but is missing on disk — fail loudly
+            # so the user knows exactly what went wrong instead of silently
+            # generating a deck with the wrong (default) template.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Template file '{tpl_fname}' was not found on this server. "
+                    "Please re-select a template or contact support."
+                ),
+            )
+
+    tpl_used = os.path.basename(chosen_tpl_path) if chosen_tpl_path else "Common Template.pptx (default)"
+    print(f"  [generate] template → {tpl_used}")
 
     output_path = await asyncio.to_thread(
-        generate_pptx, slide_contents, context, output_filename, s.strategy
+        generate_pptx, slide_contents, context, output_filename, s.strategy,
+        chosen_tpl_path,
     )
     s.output_filename = output_filename
     s.touch()
@@ -913,6 +1058,7 @@ async def generate(session_id: str):
     result = {
         "status": "success",
         "filename": output_filename,
+        "template_used": tpl_used,
         "total_pages": len(s.pages),
         "total_slides": len(slide_contents),
         "analytics": analytics,

@@ -97,6 +97,9 @@ export default function PageReview({
   // Diagrams & formulas tab.
   const [activeTab, setActiveTab] = useState<ReviewTab>("text");
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  // Clicking a box on the page sets this so the matching card scrolls into view.
+  // It's a {id, n} pair so re-clicking the same box still re-triggers the scroll.
+  const [focusFigure, setFocusFigure] = useState<{ id: string; n: number } | null>(null);
   const [addMode, setAddMode] = useState(false);
   // Displayed-image rectangle (px, relative to its container) so bounding-box
   // overlays line up with the object-contain'd page image exactly.
@@ -515,6 +518,9 @@ export default function PageReview({
               addMode={addMode}
               highlightId={highlightId}
               onHighlight={setHighlightId}
+              onSelect={(id) =>
+                setFocusFigure((prev) => ({ id, n: (prev?.n ?? 0) + 1 }))
+              }
               onUpdateBbox={handleUpdateBbox}
               onAddFigure={handleAddFigure}
               onExitAddMode={() => setAddMode(false)}
@@ -554,6 +560,7 @@ export default function PageReview({
             notify={notify}
             highlightId={highlightId}
             onHighlight={setHighlightId}
+            focusFigure={focusFigure}
             addMode={addMode}
             onToggleAddMode={() => setAddMode((v) => !v)}
           />

@@ -22,6 +22,7 @@ interface Props {
   addMode: boolean;
   highlightId: string | null;
   onHighlight: (id: string | null) => void;
+  onSelect?: (id: string) => void;
   onUpdateBbox: (id: string, box: Box) => void;
   onAddFigure: (box: Box) => void;
   onExitAddMode: () => void;
@@ -38,6 +39,7 @@ export default function FigureBoxLayer({
   addMode,
   highlightId,
   onHighlight,
+  onSelect,
   onUpdateBbox,
   onAddFigure,
   onExitAddMode,
@@ -144,6 +146,8 @@ export default function FigureBoxLayer({
           Math.abs(box.w - d.orig.w) > 0.2 ||
           Math.abs(box.h - d.orig.h) > 0.2;
         if (moved) onUpdateBbox(d.id, box);
+        // A click without a drag = "take me to this figure's card".
+        else if (d.kind === "move") onSelect?.(d.id);
       }
     }
     setLive(null);
@@ -180,12 +184,12 @@ export default function FigureBoxLayer({
             data-box={f.id}
             onMouseEnter={() => onHighlight(f.id)}
             onMouseLeave={() => onHighlight(null)}
-            className={`absolute rounded-md border-2 transition-colors ${
+            className={`absolute rounded-md border-2 transition-all ${
               excluded
                 ? "cursor-move border-dashed border-zinc-500/60 bg-transparent opacity-60"
                 : isHi
-                ? "cursor-move border-amber-300 bg-amber-300/20"
-                : "cursor-move border-amber-400/80 bg-amber-400/10"
+                ? "cursor-pointer border-fuchsia-400 bg-fuchsia-400/25 shadow-[0_0_16px_3px_rgba(232,121,249,0.7)]"
+                : "cursor-pointer border-amber-400/80 bg-amber-400/10"
             }`}
             style={style}
           >
@@ -195,7 +199,7 @@ export default function FigureBoxLayer({
                 excluded
                   ? "bg-zinc-600 text-zinc-200 line-through"
                   : isHi
-                  ? "bg-amber-300 text-black"
+                  ? "bg-fuchsia-400 text-black shadow-[0_0_8px_1px_rgba(232,121,249,0.8)]"
                   : "bg-amber-500/90 text-black"
               }`}
             >

@@ -15,6 +15,7 @@ import PreviewPane from "@/components/PreviewPane";
 import AnalyticsModal from "@/components/AnalyticsModal";
 import PageReview from "@/components/PageReview";
 import PlanReview from "@/components/PlanReview";
+import TemplatePickerStep from "@/components/TemplatePickerStep";
 import { useToasts, Toaster } from "@/components/Toast";
 import {
   startSession,
@@ -25,6 +26,14 @@ import {
   checkSessionAlive,
 } from "@/lib/api";
 import {
+  loadFromStorage,
+  saveToStorage,
+  clearStorage,
+  saveTemplate,
+  loadTemplate,
+} from "@/lib/session-store";
+import Link from "next/link";
+import {
   Compass,
   ChevronRight,
   AlertTriangle,
@@ -33,6 +42,7 @@ import {
   Link as LinkIcon,
   ScanSearch,
   Sparkles,
+  LayoutGrid,
 } from "lucide-react";
 
 const DEFAULT_CONTEXT: PDFContext = {
@@ -44,51 +54,10 @@ const DEFAULT_CONTEXT: PDFContext = {
   annotations: [],
 };
 
-const STORAGE_KEY = "deckpilot_session";
-
-interface PersistedState {
-  sessionId: string;
-  step: AppStep;
-  context: PDFContext;
-  pages: PageExtractionView[];
-  plan: PlanResponse | null;
-  result: GenerateResponse | null;
-  savedAt: number;
-}
-
-function saveToStorage(state: Partial<PersistedState>) {
-  try {
-    const existing = loadFromStorage();
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ ...existing, ...state, savedAt: Date.now() })
-    );
-  } catch {
-    // localStorage may be blocked (private mode, quota exceeded) — fail silently
-  }
-}
-
-function loadFromStorage(): PersistedState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PersistedState;
-  } catch {
-    return null;
-  }
-}
-
-function clearStorage() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 const WIZARD: { step: AppStep; label: string }[] = [
   { step: "upload", label: "Upload" },
   { step: "configure", label: "Configure" },
+  { step: "choose-template", label: "Template" },
   { step: "review-pages", label: "Pages" },
   { step: "review-plan", label: "Plan" },
   { step: "done", label: "Download" },
@@ -104,6 +73,12 @@ export default function Home() {
   const [pages, setPages] = useState<PageExtractionView[]>([]);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
+
+  // Template is persisted in a SEPARATE localStorage key (not gated on sessionId)
+  // so the choice survives restores and navigating back/forward in the wizard.
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(
+    () => (typeof window !== "undefined" ? loadTemplate() : null)
+  );
 
   const [starting, setStarting] = useState(false);
   const [building, setBuilding] = useState(false);
@@ -132,6 +107,11 @@ export default function Home() {
       setPages(saved.pages ?? []);
       setPlan(saved.plan ?? null);
       setResult(saved.result ?? null);
+      // Prefer the standalone template key; fall back to session-bundled value
+      // so old sessions that saved it inside the session blob still work.
+      const tpl = loadTemplate() ?? saved.selectedTemplate ?? null;
+      setSelectedTemplate(tpl);
+      if (tpl) saveTemplate(tpl);  // ensure standalone key is also set
       // Don't restore "generating" step — user should re-trigger or see done
       const safeStep = saved.step === "generating" ? "review-plan" : saved.step;
       setStep(safeStep);
@@ -143,8 +123,8 @@ export default function Home() {
   // ── Persist key state to localStorage whenever it changes ────────────────
   useEffect(() => {
     if (!sessionId) return;
-    saveToStorage({ sessionId, step, context, pages, plan, result });
-  }, [sessionId, step, context, pages, plan, result]);
+    saveToStorage({ sessionId, step, context, pages, plan, result, selectedTemplate });
+  }, [sessionId, step, context, pages, plan, result, selectedTemplate]);
 
   useEffect(() => {
     checkHealth().then((h) => {
@@ -206,7 +186,7 @@ export default function Home() {
     setGenerating(true);
     setStep("generating");
     try {
-      const res = await generateFromSession(sessionId);
+      const res = await generateFromSession(sessionId, selectedTemplate);
       setResult(res);
       setStep("done");
       notify("Your deck is ready to download", "success");
@@ -218,7 +198,7 @@ export default function Home() {
     } finally {
       setGenerating(false);
     }
-  }, [sessionId, notify]);
+  }, [sessionId, selectedTemplate, notify]);
 
   const handleReset = useCallback(() => {
     if (sessionId) endSession(sessionId);
@@ -231,6 +211,8 @@ export default function Home() {
     setPages([]);
     setPlan(null);
     setResult(null);
+    setSelectedTemplate(null);
+    saveTemplate(null);    // clear the standalone template key too
     setError(null);
     setShowAnalytics(false);
   }, [sessionId]);
@@ -252,8 +234,9 @@ export default function Home() {
     if (step === "generating") return false; // block navigation mid-generation
     if (target === "upload") return currentIdx > 0;
     if (target === "configure") return currentIdx > 1;
-    if (target === "review-pages") return Boolean(sessionId) && currentIdx > 2;
-    if (target === "review-plan") return Boolean(plan) && currentIdx > 3;
+    if (target === "choose-template") return currentIdx > 2;
+    if (target === "review-pages") return Boolean(sessionId) && currentIdx > 3;
+    if (target === "review-plan") return Boolean(plan) && currentIdx > 4;
     if (target === "done") return Boolean(result);
     return false;
   };
@@ -349,7 +332,7 @@ export default function Home() {
               : "max-w-xl"
           }`}
         >
-          {(step === "upload" || step === "configure") && (
+          {(step === "upload" || step === "configure" || step === "choose-template") && (
             <div className="border-b border-white/5 px-7 py-6">
               <h1 className="text-xl font-bold tracking-tight text-white">
                 {step === "upload" && (
@@ -359,12 +342,15 @@ export default function Home() {
                   </>
                 )}
                 {step === "configure" && "Tell PPTPilot about your class"}
+                {step === "choose-template" && "Pick a slide design"}
               </h1>
               <p className="mt-1.5 text-sm text-zinc-500">
                 {step === "upload" &&
                   "MCQs, theory or mixed — upload it and review every page before a single slide is built."}
                 {step === "configure" &&
                   "This tailors the deck. You stay in control at every step."}
+                {step === "choose-template" &&
+                  "Every slide will follow this template's colors and layout — your content fills it in."}
               </p>
             </div>
           )}
@@ -433,7 +419,7 @@ export default function Home() {
                   ].map((s, i) => (
                     <div
                       key={s.label}
-                      className="animate-fade-up rounded-xl border border-white/6 bg-white/[0.02] p-3 text-center"
+                      className="animate-fade-up rounded-xl border border-white/6 bg-white/2 p-3 text-center"
                       style={{ animationDelay: `${i * 80}ms` }}
                     >
                       <s.icon className="mx-auto h-4 w-4 text-orange-300" />
@@ -472,24 +458,30 @@ export default function Home() {
                     Back
                   </button>
                   <button
-                    disabled={!isFormValid || serverOnline === false || starting}
-                    onClick={handleAnalyse}
+                    disabled={!isFormValid || serverOnline === false}
+                    onClick={() => setStep("choose-template")}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl brand-gradient px-5 py-3 text-sm font-semibold text-white brand-glow-shadow transition-all hover:scale-[1.01] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100 active:scale-[0.98]"
                   >
-                    {starting ? (
-                      <>
-                        <div className="dp-spinner h-4 w-4" />
-                        Reading every page…
-                      </>
-                    ) : (
-                      <>
-                        <ScanSearch className="h-4 w-4" />
-                        Analyse PDF
-                      </>
-                    )}
+                    <ChevronRight className="h-4 w-4" />
+                    Choose Template
                   </button>
                 </div>
               </div>
+            )}
+
+            {/* ── choose template ── */}
+            {step === "choose-template" && (
+              <TemplatePickerStep
+                sessionId={sessionId}
+                selectedFilename={selectedTemplate}
+                onSelect={(filename) => {
+                  setSelectedTemplate(filename);
+                  saveTemplate(filename); // persist immediately, no session needed
+                }}
+                onBack={() => setStep("configure")}
+                onContinue={handleAnalyse}
+                saving={starting}
+              />
             )}
 
             {/* ── review pages ── */}
@@ -507,7 +499,52 @@ export default function Home() {
 
             {/* ── review plan ── */}
             {step === "review-plan" && sessionId && plan && (
-              <PlanReview
+              <>
+                {/* Template indicator — shown above the Studio link */}
+                {selectedTemplate && (
+                  <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/6 px-4 py-2 text-xs text-emerald-300">
+                    <span className="font-semibold">Template:</span>
+                    <span className="truncate text-emerald-200">{selectedTemplate.replace(".pptx", "").replace(/_/g, " ")}</span>
+                    <button
+                      onClick={() => setStep("choose-template")}
+                      className="ml-auto shrink-0 rounded border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-400 hover:bg-emerald-500/10 transition"
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
+                {!selectedTemplate && (
+                  <div className="mb-3 flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/6 px-4 py-2 text-xs text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>No template selected — will use the default style.</span>
+                    <button
+                      onClick={() => setStep("choose-template")}
+                      className="ml-auto shrink-0 rounded border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400 hover:bg-amber-500/10 transition"
+                    >
+                      Pick template
+                    </button>
+                  </div>
+                )}
+                <Link
+                  href="/studio"
+                  className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-orange-500/25 bg-orange-500/[0.06] px-4 py-3 transition hover:border-orange-500/40 hover:bg-orange-500/[0.1]"
+                >
+                  <span className="flex items-center gap-3">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl brand-gradient shadow-lg shadow-orange-500/30">
+                      <LayoutGrid className="h-4 w-4 text-white" />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-white">
+                        Open Slide Studio
+                      </span>
+                      <span className="block text-xs text-zinc-400">
+                        Full-screen editor — preview each slide, change its type &amp; reorder
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-orange-300" />
+                </Link>
+                <PlanReview
                 sessionId={sessionId}
                 plan={plan}
                 onPlanChange={setPlan}
@@ -518,6 +555,7 @@ export default function Home() {
                 generating={generating}
                 notify={notify}
               />
+              </>
             )}
 
             {/* ── generating ── */}
@@ -541,6 +579,11 @@ export default function Home() {
                     : "mx-auto max-w-md animate-fade-in"
                 }
               >
+                {result.template_used && (
+                  <div className="mb-1 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2 text-xs text-emerald-400 col-span-full">
+                    Built with template: <strong className="text-emerald-300">{result.template_used.replace(".pptx", "").replace(/_/g, " ")}</strong>
+                  </div>
+                )}
                 <DownloadCard
                   result={result}
                   previewAvailable={previewAvailable}

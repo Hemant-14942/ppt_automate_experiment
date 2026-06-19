@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FigureView, PageExtractionView } from "@/types";
 import type { ToastType } from "@/components/Toast";
 import { getFigureCropURL, updateFigure, deleteFigure } from "@/lib/api";
@@ -26,6 +26,7 @@ interface DiagramsPanelProps {
   notify: (message: string, type?: ToastType) => void;
   highlightId: string | null;
   onHighlight: (id: string | null) => void;
+  focusFigure?: { id: string; n: number } | null;
   addMode: boolean;
   onToggleAddMode: () => void;
 }
@@ -47,6 +48,7 @@ export default function DiagramsPanel({
   notify,
   highlightId,
   onHighlight,
+  focusFigure,
   addMode,
   onToggleAddMode,
 }: DiagramsPanelProps) {
@@ -109,6 +111,9 @@ export default function DiagramsPanel({
                   notify={notify}
                   highlighted={highlightId === fig.id}
                   onHighlight={onHighlight}
+                  focusSignal={
+                    focusFigure?.id === fig.id ? focusFigure.n : null
+                  }
                 />
               ))}
             </div>
@@ -148,6 +153,7 @@ interface FigureCardProps {
   notify: (message: string, type?: ToastType) => void;
   highlighted: boolean;
   onHighlight: (id: string | null) => void;
+  focusSignal: number | null;
 }
 
 function FigureCard({
@@ -158,10 +164,23 @@ function FigureCard({
   notify,
   highlighted,
   onHighlight,
+  focusSignal,
 }: FigureCardProps) {
   const [label, setLabel] = useState(figure.label || "");
   const [belongsTo, setBelongsTo] = useState(figure.belongs_to || "");
   const [saving, setSaving] = useState(false);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [pinged, setPinged] = useState(false);
+
+  // Scroll this card into view (and flash it) whenever its box is clicked on
+  // the page. focusSignal bumps each click so re-clicking re-triggers it.
+  useEffect(() => {
+    if (focusSignal == null) return;
+    cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setPinged(true);
+    const t = window.setTimeout(() => setPinged(false), 1100);
+    return () => window.clearTimeout(t);
+  }, [focusSignal]);
   // Cache-bust the crop image with `rev` so adjusting the box refreshes it.
   const cropUrl = figure.has_crop
     ? getFigureCropURL(sessionId, page.page_number, figure.id, figure.rev)
@@ -217,13 +236,14 @@ function FigureCard({
 
   return (
     <div
+      ref={cardRef}
       onMouseEnter={() => onHighlight(figure.id)}
       onMouseLeave={() => onHighlight(null)}
-      className={`relative rounded-xl border bg-white/2 p-3 transition ${
+      className={`relative scroll-mt-3 rounded-xl border bg-white/2 p-3 transition-all ${
         excluded
           ? "border-white/8 opacity-55"
-          : highlighted
-          ? "border-amber-500/50 ring-1 ring-amber-500/30"
+          : pinged || highlighted
+          ? "border-fuchsia-400/70 ring-1 ring-fuchsia-400/50 shadow-[0_0_18px_-2px_rgba(232,121,249,0.6)]"
           : "border-white/8"
       }`}
     >

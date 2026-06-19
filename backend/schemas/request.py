@@ -26,13 +26,15 @@ class PDFContext(BaseModel):
 
 class GenerateResponse(BaseModel):
     """What the API returns after processing."""
-    status:       str                   # "success" / "error"
-    job_id:       Optional[str] = None
-    filename:     Optional[str] = None
-    download_url: Optional[str] = None
-    preview_url:  Optional[str] = None
-    total_pages:  Optional[int] = None
-    total_slides: Optional[int] = None
-    message:      Optional[str] = None
+    status:        str                   # "success" / "error"
+    job_id:        Optional[str] = None
+    filename:      Optional[str] = None
+    download_url:  Optional[str] = None
+    preview_url:   Optional[str] = None
+    total_pages:   Optional[int] = None
+    total_slides:  Optional[int] = None
+    message:       Optional[str] = None
+    # Which reference template file was used for this deck.
+    template_used: Optional[str] = None
     # Token usage / cost report (model-aware) for the frontend analytics view.
-    analytics:    Optional[dict] = None
+    analytics:     Optional[dict] = None

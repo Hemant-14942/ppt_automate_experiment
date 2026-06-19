@@ -57,6 +57,8 @@ export interface GenerateResponse {
   total_pages?: number;
   total_slides?: number;
   message?: string;
+  /** Which reference template file was used to build this deck. */
+  template_used?: string;
   analytics?: Analytics;
 }
 
@@ -89,6 +91,8 @@ export interface FigureBBox {
 
 export type FigureUseMode = "image" | "text";
 export type FigurePlacement = "own_slide" | "on_slide";
+export type FigureSize = "small" | "medium" | "large";
+export type FigureAlign = "left" | "center" | "right";
 
 export interface FigureView {
   id: string;
@@ -103,6 +107,9 @@ export interface FigureView {
   has_crop: boolean;
   included: boolean;
   placement: FigurePlacement;
+  size: FigureSize;
+  align: FigureAlign;
+  attached_slide_uid?: string | null;
   rev: number;
 }
 
@@ -144,6 +151,7 @@ export interface SlideOutlineView {
   slide_number: number;
   title: string;
   template: string;
+  uid?: string;
   source_pages: number[];
   key_points: string[];
   include_diagram: boolean;
@@ -161,10 +169,17 @@ export interface PlanResponse {
 export type AppStep =
   | "upload"
   | "configure"
+  | "choose-template"
   | "review-pages"
   | "review-plan"
   | "generating"
   | "done";
+
+export interface TemplateOption {
+  id: string;
+  name: string;
+  filename: string;
+}
 
 export type PipelineStepStatus = "waiting" | "active" | "done" | "error";
 
