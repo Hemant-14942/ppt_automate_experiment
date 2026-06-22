@@ -30,13 +30,14 @@ class FigureView(BaseModel):
     position:     Optional[str] = None
     label:        str = ""                 # short user-facing label
     use_mode:     str = "image"            # "image" (crop) | "text" (description)
-    source:       str = "ai"               # "ai" | "manual"
+    source:       str = "ai"               # "ai" | "manual" | "gallery"
     has_crop:     bool = False             # true when a usable bbox exists
     included:     bool = True              # false = excluded, won't reach the deck
     placement:    str = "own_slide"        # "own_slide" | "on_slide" (with question)
     size:         str = "medium"           # "small" | "medium" | "large" render size
     align:        str = "right"            # "left" | "center" | "right" position
     attached_slide_uid: Optional[str] = None  # pin to a specific slide (SlideOutline.uid)
+    gallery_id:   Optional[str] = None     # set when source == "gallery"
     rev:          int = 0                  # bumps when the bbox changes (cache-bust)
 
 
@@ -162,3 +163,41 @@ class AddSlideRequest(BaseModel):
 class ReorderRequest(BaseModel):
     """New slide order, given as the current slide_numbers in the desired order."""
     order: list[int]
+
+
+# ── image gallery ─────────────────────────────────────────────────────────────
+
+class GalleryImageView(BaseModel):
+    """One image in the session gallery (stored as base64 in session memory)."""
+    id:          str
+    label:       str
+    source:      str            # "crop" | "generated" | "edited"
+    mime:        str            # "image/png"
+    prompt:      Optional[str] = None
+    parent_id:   Optional[str] = None   # edit history chain
+    figure_ref:  Optional[dict] = None  # {"page": int, "id": str} for PDF crops
+    created_at:  float
+
+
+class GalleryResponse(BaseModel):
+    images: list[GalleryImageView]
+
+
+class GallerySaveRequest(BaseModel):
+    """Save a detected figure crop to the gallery."""
+    page:       int
+    figure_id:  str
+    label:      Optional[str] = None
+
+
+class GalleryGenerateRequest(BaseModel):
+    """Generate a brand-new image from a text prompt (Imagen 3)."""
+    prompt:  str
+    label:   Optional[str] = None
+
+
+class GalleryEditRequest(BaseModel):
+    """Edit an existing gallery image with a natural-language instruction."""
+    image_id:  str
+    prompt:    str
+    label:     Optional[str] = None

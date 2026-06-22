@@ -17,6 +17,7 @@ import {
   Sparkles,
   AlertTriangle,
   Images,
+  Layers,
 } from "lucide-react";
 
 import { PlanResponse, SlideOutlineView, PageExtractionView, FigureView } from "@/types";
@@ -41,6 +42,12 @@ import {
 import SlideSchematic from "@/components/SlideSchematic";
 import SlideTypeGallery from "@/components/SlideTypeGallery";
 import ImageLibrary from "@/components/ImageLibrary";
+import ImageStudio from "@/components/ImageStudio";
+import SlideInsertControls, {
+  SlideInsertMode,
+  insertPositionLabel,
+  resolveAfterSlideNumber,
+} from "@/components/SlideInsertControls";
 import { useToasts, Toaster } from "@/components/Toast";
 
 type LoadState = "loading" | "ready" | "no-session" | "expired";
@@ -69,6 +76,7 @@ export default function StudioPage() {
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [imagesOpen, setImagesOpen] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
   // When set, the Image library opens in "attach to this slide" mode.
   const [attachTarget, setAttachTarget] = useState<{ uid: string; label: string } | null>(null);
 
@@ -84,6 +92,8 @@ export default function StudioPage() {
 
   // add-slide
   const [addPage, setAddPage] = useState(1);
+  const [addInsertMode, setAddInsertMode] = useState<SlideInsertMode>("end");
+  const [addBetweenAfter, setAddBetweenAfter] = useState(1);
 
   // drag reorder
   const [dragNum, setDragNum] = useState<number | null>(null);
@@ -325,13 +335,28 @@ export default function StudioPage() {
       const lastNum = plan.slides.length
         ? plan.slides[plan.slides.length - 1].slide_number
         : 0;
+      const afterNum = resolveAfterSlideNumber(
+        addInsertMode,
+        addBetweenAfter,
+        lastNum
+      );
       const updated = await addSlide(sessionId, {
-        after_slide_number: lastNum,
+        after_slide_number: afterNum,
         source_page: addPage,
       });
       setPlan(updated);
-      setSelectedNum(updated.slides[updated.slides.length - 1]?.slide_number ?? null);
-      notify(`Added a slide from page ${addPage}`, "success");
+      const newNum =
+        addInsertMode === "end"
+          ? updated.slides[updated.slides.length - 1]?.slide_number
+          : addInsertMode === "start"
+          ? updated.slides[0]?.slide_number
+          : updated.slides.find((s) => s.slide_number === afterNum + 1)
+              ?.slide_number ?? afterNum + 1;
+      setSelectedNum(newNum ?? null);
+      notify(
+        `Added a slide from page ${addPage} ${insertPositionLabel(addInsertMode, addBetweenAfter)}`,
+        "success"
+      );
     } catch (e) {
       notify((e as Error).message || "Could not add slide", "error");
     } finally {
@@ -470,6 +495,14 @@ export default function StudioPage() {
             )}
           </button>
           <button
+            onClick={() => setStudioOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-violet-500/25 bg-violet-500/8 px-3.5 py-2 text-sm font-medium text-violet-200 transition hover:bg-violet-500/15"
+            title="Image Studio — save, generate & AI-edit images"
+          >
+            <Layers className="h-4 w-4" />
+            Image Studio
+          </button>
+          <button
             onClick={handleGenerate}
             disabled={generating || plan.slides.length === 0}
             title={selectedTemplate ? `Using: ${selectedTemplate}` : "Warning: no template selected"}
@@ -553,7 +586,7 @@ export default function StudioPage() {
           </div>
 
           {/* add slide */}
-          <div className="shrink-0 border-t border-white/8 p-3">
+          <div className="shrink-0 border-t border-white/8 p-3 space-y-2">
             <div className="flex items-center gap-2">
               <select
                 value={addPage}
@@ -574,6 +607,20 @@ export default function StudioPage() {
                 <Plus className="h-3.5 w-3.5" /> Add
               </button>
             </div>
+            {plan && (
+              <SlideInsertControls
+                slideCount={plan.slides.length}
+                lastSlideNum={
+                  plan.slides.length
+                    ? plan.slides[plan.slides.length - 1].slide_number
+                    : 0
+                }
+                mode={addInsertMode}
+                betweenAfter={addBetweenAfter}
+                onModeChange={setAddInsertMode}
+                onBetweenAfterChange={setAddBetweenAfter}
+              />
+            )}
           </div>
         </aside>
 
@@ -834,6 +881,21 @@ export default function StudioPage() {
             setImagesOpen(false);
             setAttachTarget(null);
           }}
+          onOpenStudio={() => {
+            setImagesOpen(false);
+            setStudioOpen(true);
+          }}
+          notify={notify}
+        />
+      )}
+
+      {studioOpen && sessionId && (
+        <ImageStudio
+          sessionId={sessionId}
+          pages={pages}
+          onPagesChange={handlePagesChange}
+          attachTarget={attachTarget}
+          onClose={() => setStudioOpen(false)}
           notify={notify}
         />
       )}

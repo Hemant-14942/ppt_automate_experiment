@@ -47,6 +47,11 @@ from schemas.session import (
     SlideEditRequest,
     AddSlideRequest,
     ReorderRequest,
+    GalleryImageView,
+    GalleryResponse,
+    GallerySaveRequest,
+    GalleryGenerateRequest,
+    GalleryEditRequest,
 )
 from pipeline.session_store import (
     store,
@@ -437,12 +442,29 @@ def _find_figure(ps: PageState, figure_id: str) -> dict:
 
 @router.get("/{session_id}/page/{page_number}/figure/{figure_id}/crop")
 async def figure_crop(session_id: str, page_number: int, figure_id: str):
-    """Return the cropped diagram region as a PNG for the review UI preview."""
+    """Return the cropped diagram region as a PNG for the review UI preview.
+
+    Gallery-sourced figures (source='gallery', gallery_id set) are served directly
+    from the session gallery instead of re-cropping from the PDF page.
+    """
     s = _require(session_id)
     ps = s.pages.get(page_number)
     if ps is None:
         raise HTTPException(status_code=404, detail="Page not found")
     fig = _find_figure(ps, figure_id)
+
+    # Gallery figure — serve from in-memory gallery bytes
+    gallery_id = fig.get("gallery_id")
+    if gallery_id:
+        gal = next((g for g in (s.gallery or []) if g["id"] == gallery_id), None)
+        if not gal:
+            raise HTTPException(status_code=404, detail="Gallery image not found")
+        return Response(
+            content=base64.b64decode(gal["base64"]),
+            media_type=gal["mime"],
+            headers={"Cache-Control": "no-store"},
+        )
+
     png = await asyncio.to_thread(crop_page_region, ps.base64, fig.get("bbox"))
     return Response(
         content=png,
@@ -588,23 +610,208 @@ async def delete_figure(session_id: str, page_number: int, figure_id: str):
     return _page_view(ps)
 
 
+# ── image gallery ─────────────────────────────────────────────────────────────
+
+@router.get("/{session_id}/gallery", response_model=GalleryResponse)
+async def list_gallery(session_id: str):
+    """Return all gallery images for a session (metadata only, no base64)."""
+    s = _require(session_id)
+    return GalleryResponse(images=[GalleryImageView(**g) for g in (s.gallery or [])])
+
+
+@router.get("/{session_id}/gallery/{image_id}")
+async def get_gallery_image(session_id: str, image_id: str):
+    """Serve a gallery image as PNG bytes."""
+    s = _require(session_id)
+    img = next((g for g in (s.gallery or []) if g["id"] == image_id), None)
+    if not img:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    return Response(
+        content=base64.b64decode(img["base64"]),
+        media_type=img["mime"],
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.post("/{session_id}/gallery/from-figure", response_model=GalleryImageView)
+async def save_figure_to_gallery(session_id: str, body: GallerySaveRequest):
+    """Crop a detected figure and save it to the session gallery."""
+    s = _require(session_id)
+    ps = s.pages.get(body.page)
+    if ps is None:
+        raise HTTPException(status_code=404, detail="Page not found")
+    fig = _find_figure(ps, body.figure_id)
+    if not fig.get("has_crop") or not fig.get("bbox"):
+        raise HTTPException(status_code=400, detail="This figure has no crop region")
+
+    png = await asyncio.to_thread(crop_page_region, ps.base64, fig.get("bbox"))
+    gid = str(uuid.uuid4())[:8]
+    label = (body.label or fig.get("label") or "Cropped image").strip()
+    entry = {
+        "id": f"gal_{gid}",
+        "label": label,
+        "source": "crop",
+        "base64": base64.b64encode(png).decode(),
+        "mime": "image/png",
+        "prompt": None,
+        "parent_id": None,
+        "figure_ref": {"page": body.page, "id": body.figure_id},
+        "created_at": time.time(),
+    }
+    s.gallery.append(entry)
+    s.touch()
+    return GalleryImageView(**entry)
+
+
+@router.post("/{session_id}/gallery/generate", response_model=GalleryImageView)
+async def generate_gallery_image(session_id: str, body: GalleryGenerateRequest):
+    """Generate a brand-new image from a text prompt (Imagen 3)."""
+    from agents.image_studio import generate_image_from_prompt
+
+    s = _require(session_id)
+    try:
+        png = await generate_image_from_prompt(body.prompt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {e}")
+
+    gid = str(uuid.uuid4())[:8]
+    label = (body.label or body.prompt[:60]).strip()
+    entry = {
+        "id": f"gal_{gid}",
+        "label": label,
+        "source": "generated",
+        "base64": base64.b64encode(png).decode(),
+        "mime": "image/png",
+        "prompt": body.prompt,
+        "parent_id": None,
+        "figure_ref": None,
+        "created_at": time.time(),
+    }
+    s.gallery.append(entry)
+    s.touch()
+    return GalleryImageView(**entry)
+
+
+@router.post("/{session_id}/gallery/edit", response_model=GalleryImageView)
+async def edit_gallery_image(session_id: str, body: GalleryEditRequest):
+    """Edit an existing gallery image with a natural-language instruction."""
+    from agents.image_studio import edit_image_with_gemini
+
+    s = _require(session_id)
+    parent = next((g for g in (s.gallery or []) if g["id"] == body.image_id), None)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+
+    src_bytes = base64.b64decode(parent["base64"])
+    try:
+        edited = await edit_image_with_gemini(src_bytes, body.prompt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image editing failed: {e}")
+
+    gid = str(uuid.uuid4())[:8]
+    label = (body.label or parent["label"]).strip()
+    entry = {
+        "id": f"gal_{gid}",
+        "label": label,
+        "source": "edited",
+        "base64": base64.b64encode(edited).decode(),
+        "mime": "image/png",
+        "prompt": body.prompt,
+        "parent_id": parent["id"],
+        "figure_ref": parent.get("figure_ref"),
+        "created_at": time.time(),
+    }
+    s.gallery.append(entry)
+    s.touch()
+    return GalleryImageView(**entry)
+
+
+@router.delete("/{session_id}/gallery/{image_id}", response_model=GalleryResponse)
+async def delete_gallery_image(session_id: str, image_id: str):
+    """Remove an image from the gallery."""
+    s = _require(session_id)
+    before = len(s.gallery)
+    s.gallery = [g for g in s.gallery if g["id"] != image_id]
+    if len(s.gallery) == before:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    s.touch()
+    return GalleryResponse(images=[GalleryImageView(**g) for g in s.gallery])
+
+
+@router.post("/{session_id}/gallery/{image_id}/use-in-deck", response_model=PageExtractionView)
+async def use_gallery_image_in_deck(session_id: str, image_id: str):
+    """Add a gallery image as a figure on the first approved page.
+
+    Creates a figure entry with source='gallery' and gallery_id pointing back to
+    the gallery entry.  The figure then appears in the Images modal where the user
+    can pin it to any slide.  At generation time _build_session_figures() uses the
+    gallery base64 directly instead of cropping from the PDF page.
+    """
+    s = _require(session_id)
+    gal = next((g for g in (s.gallery or []) if g["id"] == image_id), None)
+    if not gal:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+
+    # Find first non-skipped page with an extraction
+    approved = sorted(
+        n for n, ps in s.pages.items()
+        if ps.status != "skipped" and ps.extraction is not None
+    )
+    if not approved:
+        raise HTTPException(status_code=400, detail="No approved pages — review pages first")
+
+    target_page = approved[0]
+    ps = s.pages[target_page]
+
+    # Avoid duplicate — if this gallery image is already attached, return as-is
+    existing = next((f for f in ps.figures if f.get("gallery_id") == image_id), None)
+    if existing:
+        return _page_view(ps)
+
+    fig_id = f"p{target_page}_gal_{image_id[-8:]}"
+    fig: dict = {
+        "id":                 fig_id,
+        "description":        gal["label"],
+        "belongs_to":         None,
+        "diagram_type":       "figure",
+        "bbox":               None,
+        "position":           "standalone",
+        "label":              gal["label"],
+        "use_mode":           "image",
+        "source":             "gallery",
+        "has_crop":           True,   # served via gallery bytes
+        "gallery_id":         image_id,
+        "included":           True,
+        "placement":          "own_slide",
+        "size":               "medium",
+        "align":              "right",
+        "attached_slide_uid": None,
+        "rev":                0,
+    }
+    ps.figures.append(fig)
+    s.touch()
+    return _page_view(ps)
+
+
 # ── figure → slide helpers (used at generation) ──────────────────────────────
 
 def _build_session_figures(
     session: Session,
-) -> tuple[dict[int, list[SlideFigure]], dict[str, list[SlideFigure]]]:
+) -> tuple[dict[int, list[SlideFigure]], dict[str, list[SlideFigure]], list[SlideFigure]]:
     """
     Turn each page's INCLUDED figures into SlideFigure objects, cropping the
     image-mode ones to PNG files on disk.
 
-    Returns (page_figures, uid_figures):
-      • page_figures : {page_number: [SlideFigure]} — placed by page heuristics.
-      • uid_figures  : {slide_uid:   [SlideFigure]} — explicitly pinned by the
-                       user to a specific slide (SlideOutline.uid).
+    Returns (page_figures, uid_figures, deck_figures):
+      • page_figures : {page_number: [SlideFigure]} — PDF figures placed by page.
+      • uid_figures  : {slide_uid:   [SlideFigure]} — explicitly pinned by the user.
+      • deck_figures : [SlideFigure] — gallery/studio images with no slide pin;
+                       each gets its own slide just before the thank-you slide.
     A figure pinned to a slide is ONLY in uid_figures, never page_figures.
     """
     out: dict[int, list[SlideFigure]] = {}
     pinned: dict[str, list[SlideFigure]] = {}
+    deck: list[SlideFigure] = []
     fig_dir = os.path.join(OUTPUT_DIR, "_figures", session.session_id)
 
     for n in sorted(session.pages):
@@ -642,25 +849,39 @@ def _build_session_figures(
                 try:
                     os.makedirs(fig_dir, exist_ok=True)
                     path = os.path.join(fig_dir, f"{f['id']}.png")
-                    png = crop_page_region(ps.base64, f.get("bbox"))
+                    # Gallery-sourced figures use the stored base64 directly
+                    # instead of re-cropping from the PDF page.
+                    gallery_id = f.get("gallery_id")
+                    if gallery_id:
+                        gal = next(
+                            (g for g in (session.gallery or []) if g["id"] == gallery_id),
+                            None,
+                        )
+                        if gal:
+                            png = base64.b64decode(gal["base64"])
+                        else:
+                            raise ValueError(f"Gallery image {gallery_id} not found")
+                    else:
+                        png = crop_page_region(ps.base64, f.get("bbox"))
                     with open(path, "wb") as fh:
                         fh.write(png)
                     sf.image_path = path
                 except Exception as e:
-                    # Cropping failed — degrade to the text description so the
-                    # figure still reaches the deck instead of vanishing.
+                    # Cropping/lookup failed — degrade to text description.
                     print(f"  [session {session.session_id}] crop failed for {f.get('id')}: {e}")
                     sf.kind = "text"
                     sf.image_path = None
 
             if attached_uid:
                 pinned.setdefault(attached_uid, []).append(sf)
+            elif f.get("source") == "gallery":
+                deck.append(sf)
             else:
                 page_figs.append(sf)
 
         if page_figs:
             out[n] = page_figs
-    return out, pinned
+    return out, pinned, deck
 
 
 def _figure_to_slide(sf: SlideFigure) -> SlideContent:
@@ -675,32 +896,47 @@ def _figure_to_slide(sf: SlideFigure) -> SlideContent:
     )
 
 
+def _thank_you_index(slides: list[SlideContent]) -> int | None:
+    for i, sc in enumerate(slides):
+        if sc.layout == TemplateType.thank_you_slide:
+            return i
+    return None
+
+
+def _is_thank_you(sc: SlideContent) -> bool:
+    return sc.layout == TemplateType.thank_you_slide
+
+
 def _inject_figure_slides(
     slide_contents: list[SlideContent],
     page_figures: dict[int, list[SlideFigure]],
     uid_figures: dict[str, list[SlideFigure]] | None = None,
+    deck_figures: list[SlideFigure] | None = None,
 ) -> list[SlideContent]:
     """
     Place each chosen figure relative to its target slide:
 
       • Figures pinned to a slide (uid_figures) go to the exact slide whose
         source_uid matches — surviving reflow/renumbering.
-      • Other figures are placed by page heuristics (page_figures).
+      • PDF figures are placed by page heuristics (page_figures).
+      • Gallery/studio images without a pin become own slides before thank-you.
 
     For each figure:
       • placement == "on_slide" → embed on the matched slide (inline_figures).
       • placement == "own_slide" → a companion `figure_slide` right after it.
 
-    Figures whose target produced no slide fall back to a companion slide
-    appended at the end. Slides are renumbered afterwards.
+    Nothing is embedded on or inserted after the thank-you slide.
     """
     uid_figures = uid_figures or {}
-    if not page_figures and not uid_figures:
+    deck_figures = deck_figures or []
+    if not page_figures and not uid_figures and not deck_figures:
         return slide_contents
 
     # Clear any LLM-produced inline figures (only we attach these).
     for sc in slide_contents:
         sc.inline_figures = []
+
+    thank_idx = _thank_you_index(slide_contents)
 
     # Last slide index that references each page (page heuristic anchor).
     last_idx: dict[int, int] = {}
@@ -721,36 +957,55 @@ def _inject_figure_slides(
         last_uid_idx[u] = i
 
     inserts: dict[int, list[SlideContent]] = {}
-    trailing: list[SlideContent] = []
+    before_thank_you: list[SlideContent] = [
+        _figure_to_slide(sf) for sf in deck_figures
+    ]
+
+    def _companion_after(idx: int, sf: SlideFigure) -> None:
+        if _is_thank_you(slide_contents[idx]):
+            before_thank_you.append(_figure_to_slide(sf))
+        else:
+            inserts.setdefault(idx, []).append(_figure_to_slide(sf))
 
     # 1) Explicitly pinned figures — anchored by slide uid.
     for uid, figs in uid_figures.items():
         for sf in figs:
             if sf.placement == "on_slide" and uid in first_uid_idx:
-                slide_contents[first_uid_idx[uid]].inline_figures.append(sf)
+                target = slide_contents[first_uid_idx[uid]]
+                if _is_thank_you(target):
+                    before_thank_you.append(_figure_to_slide(sf))
+                else:
+                    slide_contents[first_uid_idx[uid]].inline_figures.append(sf)
             elif uid in last_uid_idx:
-                inserts.setdefault(last_uid_idx[uid], []).append(_figure_to_slide(sf))
+                _companion_after(last_uid_idx[uid], sf)
             else:
-                # Target slide no longer exists — keep the figure rather than drop.
-                trailing.append(_figure_to_slide(sf))
+                before_thank_you.append(_figure_to_slide(sf))
 
-    # 2) Page-heuristic figures.
+    # 2) Page-heuristic figures (PDF crops only — gallery goes via deck_figures).
     for page, figs in page_figures.items():
         idx = last_idx.get(page)
         for sf in figs:
             if idx is not None and sf.placement == "on_slide":
-                slide_contents[idx].inline_figures.append(sf)
+                if _is_thank_you(slide_contents[idx]):
+                    before_thank_you.append(_figure_to_slide(sf))
+                else:
+                    slide_contents[idx].inline_figures.append(sf)
             elif idx is not None:
-                inserts.setdefault(idx, []).append(_figure_to_slide(sf))
+                _companion_after(idx, sf)
             else:
-                trailing.append(_figure_to_slide(sf))
+                before_thank_you.append(_figure_to_slide(sf))
 
     new_list: list[SlideContent] = []
     for i, sc in enumerate(slide_contents):
+        if thank_idx is not None and i == thank_idx and before_thank_you:
+            new_list.extend(before_thank_you)
+            before_thank_you = []
         new_list.append(sc)
         if i in inserts:
             new_list.extend(inserts[i])
-    new_list.extend(trailing)
+
+    if before_thank_you:
+        new_list.extend(before_thank_you)
 
     for i, sc in enumerate(new_list, start=1):
         sc.slide_number = i
@@ -1018,8 +1273,10 @@ async def generate(session_id: str, body: GenerateRequest | None = None):
 
     # Inject companion slides for the diagrams/figures the user kept, each placed
     # right after the question/section it belongs to (image crop or text).
-    page_figures, uid_figures = await asyncio.to_thread(_build_session_figures, s)
-    slide_contents = _inject_figure_slides(slide_contents, page_figures, uid_figures)
+    page_figures, uid_figures, deck_figures = await asyncio.to_thread(_build_session_figures, s)
+    slide_contents = _inject_figure_slides(
+        slide_contents, page_figures, uid_figures, deck_figures
+    )
 
     # Resolve chosen template — body.template_filename takes priority,
     # then session.chosen_template (set via /template endpoint), else default.

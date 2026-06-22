@@ -7,6 +7,7 @@ import {
   PlanResponse,
   SlideOutlineView,
   TemplateOption,
+  GalleryImage,
 } from "@/types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -393,4 +394,101 @@ export async function checkSessionAlive(sessionId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ── Image Gallery API ─────────────────────────────────────────────────────────
+
+/** List all gallery images for a session (metadata only). */
+export async function getGallery(sessionId: string): Promise<GalleryImage[]> {
+  const res = await fetch(`${BASE_URL}/api/session/${sessionId}/gallery`, {
+    cache: "no-store",
+  });
+  const data = await asJson<{ images: GalleryImage[] }>(res);
+  return data.images;
+}
+
+/** Direct URL to serve a gallery image as PNG (usable in <img src={...}>). */
+export function getGalleryImageURL(sessionId: string, imageId: string): string {
+  return `${BASE_URL}/api/session/${sessionId}/gallery/${encodeURIComponent(imageId)}`;
+}
+
+/** Crop an existing figure and save it to the gallery. */
+export async function saveFigureToGallery(
+  sessionId: string,
+  page: number,
+  figureId: string,
+  label?: string
+): Promise<GalleryImage> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/gallery/from-figure`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page, figure_id: figureId, label }),
+    }
+  );
+  return asJson<GalleryImage>(res);
+}
+
+/** Generate a brand-new image from a text prompt (Imagen 3). */
+export async function generateGalleryImage(
+  sessionId: string,
+  prompt: string,
+  label?: string
+): Promise<GalleryImage> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/gallery/generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, label }),
+    }
+  );
+  return asJson<GalleryImage>(res);
+}
+
+/** Edit an existing gallery image with a natural-language instruction. */
+export async function editGalleryImage(
+  sessionId: string,
+  imageId: string,
+  prompt: string,
+  label?: string
+): Promise<GalleryImage> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/gallery/edit`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_id: imageId, prompt, label }),
+    }
+  );
+  return asJson<GalleryImage>(res);
+}
+
+/** Remove an image from the gallery. Returns the updated list. */
+export async function deleteGalleryImage(
+  sessionId: string,
+  imageId: string
+): Promise<GalleryImage[]> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/gallery/${encodeURIComponent(imageId)}`,
+    { method: "DELETE" }
+  );
+  const data = await asJson<{ images: GalleryImage[] }>(res);
+  return data.images;
+}
+
+/**
+ * Add a gallery image to the slide deck as a figure on the first approved page.
+ * Returns the updated PageExtractionView for that page so the caller can sync state.
+ */
+export async function useGalleryImageInDeck(
+  sessionId: string,
+  imageId: string
+): Promise<PageExtractionView> {
+  const res = await fetch(
+    `${BASE_URL}/api/session/${sessionId}/gallery/${encodeURIComponent(imageId)}/use-in-deck`,
+    { method: "POST" }
+  );
+  return asJson<PageExtractionView>(res);
 }

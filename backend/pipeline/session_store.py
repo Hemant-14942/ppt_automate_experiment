@@ -86,6 +86,11 @@ class Session:
     # Cumulative TokenTracker.report_dict() data across this multi-request flow.
     analytics: Optional[dict] = None
 
+    # Image gallery — cropped, generated, and AI-edited images stored as base64
+    # in session memory (no disk writes needed; same pattern as page images).
+    # Each entry is a dict matching the GalleryImageView schema.
+    gallery: list[dict] = field(default_factory=list)
+
     def touch(self) -> None:
         self.updated_at = time.time()
 
@@ -120,20 +125,36 @@ class Session:
             ex = ps.extraction
             new_text = ex.main_text
             note = ex.instructor_notes or ""
+            annotations = list(ex.annotations or [])
 
             if ps.intent_mode == INTENT_CHOOSE and ps.selected_item_ids:
                 items = split_page_items(ps.page_number, ex.main_text)
                 chosen = [it for it in items if it["id"] in set(ps.selected_item_ids)]
                 if chosen:
                     new_text = "\n\n".join(it["text"] for it in chosen)
+                    # The human's page-review choice is the final source of truth.
+                    # Old PDF marks from extraction must not bring deselected items
+                    # back into the plan or override the selected question count.
+                    annotations = []
+                    note = (
+                        note
+                        + "\nUSER_SELECTED_ITEMS_OVERRIDE: The human selected the "
+                        "items for this page after AI extraction. Ignore extracted "
+                        "PDF annotations for this page; plan only from main_text."
+                    ).strip()
 
             if ps.page_instruction and ps.page_instruction.strip():
                 note = (note + "\n" + ps.page_instruction.strip()).strip()
 
-            if new_text != ex.main_text or note != (ex.instructor_notes or ""):
+            if (
+                new_text != ex.main_text
+                or note != (ex.instructor_notes or "")
+                or annotations != list(ex.annotations or [])
+            ):
                 ex = ex.model_copy(update={
                     "main_text": new_text,
                     "instructor_notes": note or None,
+                    "annotations": annotations,
                 })
             out.append(ex)
         return out

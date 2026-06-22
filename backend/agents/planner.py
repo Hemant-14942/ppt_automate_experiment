@@ -58,6 +58,19 @@ def _only_marked_mode(context: PDFContext) -> bool:
     )
 
 
+def _annotation_rules_active(context: PDFContext) -> bool:
+    """True only when the user explicitly configured PDF mark meanings."""
+    return any(ann.selected for ann in context.annotations)
+
+
+def _has_user_selection_override(extracted_pages: list[ExtractedPage]) -> bool:
+    """True when page-review question picking should override annotation rules."""
+    return any(
+        "USER_SELECTED_ITEMS_OVERRIDE" in (p.instructor_notes or "")
+        for p in extracted_pages
+    )
+
+
 def _strategy_block(strategy) -> str:
     """Inject the Profiler's DeckStrategy as structural guidance (if available)."""
     if strategy is None:
@@ -82,7 +95,11 @@ DECK STRATEGY (from the Profiler — high-level shape for THIS document)
 """
 
 
-def build_planning_prompt(context: PDFContext, strategy=None) -> str:
+def build_planning_prompt(
+    context: PDFContext,
+    strategy=None,
+    user_selection_override: bool = False,
+) -> str:
     """
     Build the planning prompt using form context.
     Purpose and class level change how slides are structured, but content
@@ -90,7 +107,7 @@ def build_planning_prompt(context: PDFContext, strategy=None) -> str:
     The optional DeckStrategy (Phase 2) adds document-level shape guidance.
     """
 
-    only_marked = _only_marked_mode(context)
+    only_marked = _only_marked_mode(context) and not user_selection_override
 
     if only_marked:
         rules = """
@@ -569,11 +586,17 @@ def _global_summary(
     main_text to only those questions, so the override tells the planner
     "there are N questions in what you're seeing — every one needs its own slide."
     """
-    total_include = sum(_count_include_annotations(p) for p in extracted_pages)
-    only_marked = _only_marked_mode(context)
+    annotation_rules_active = _annotation_rules_active(context)
+    user_selection_override = _has_user_selection_override(extracted_pages)
+    total_include = (
+        sum(_count_include_annotations(p) for p in extracted_pages)
+        if annotation_rules_active
+        else 0
+    )
+    only_marked = _only_marked_mode(context) and not user_selection_override
     per_page = []
     for p in extracted_pages:
-        n = _count_include_annotations(p)
+        n = _count_include_annotations(p) if annotation_rules_active else 0
         if n > 0:
             targets = _summarize_include_targets(p)
             targets_str = ", ".join(targets[:10])
@@ -584,8 +607,8 @@ def _global_summary(
                 f"[{targets_str}]"
             )
 
-    # ── Checkbox-based selection (no annotations, but user hand-picked questions) ──
-    if total_include == 0 and question_count_override > 0:
+    # ── Question coverage / page-review selection enforcement ────────────────
+    if not only_marked and question_count_override > max(total_include, 0):
         per_page_q = []
         for p in extracted_pages:
             from pipeline.page_items import split_page_items
@@ -595,10 +618,11 @@ def _global_summary(
                 per_page_q.append(f"page {p.page_number}: {q_count} question(s)")
         per_page_str = "\n  - ".join(per_page_q) if per_page_q else "(see main_text)"
         return (
-            f"⚠️ HARD CONSTRAINT — USER-SELECTED QUESTIONS ⚠️\n"
-            f"The user reviewed each page and hand-picked the questions to include.\n"
-            f"main_text for each page contains ONLY those selected questions.\n"
-            f"Total selected questions across all pages: {question_count_override}\n"
+            f"⚠️ HARD CONSTRAINT — QUESTION COVERAGE ⚠️\n"
+            f"The reviewed pages contain questions that must each become slides.\n"
+            f"If the user picked specific questions, main_text already contains only "
+            f"those selected questions; otherwise it contains all kept questions.\n"
+            f"Total questions to include across all pages: {question_count_override}\n"
             f"  - {per_page_str}\n\n"
             f"RULES (NON-NEGOTIABLE):\n"
             f"  1. Create EXACTLY ONE body slide per question — do NOT merge, group,\n"
@@ -680,21 +704,28 @@ def plan_slides(
     """
 
     # ── Per-page question counts (for checkbox-selection enforcement) ────────
-    annotation_total = sum(_count_include_annotations(p) for p in extracted_pages)
-    # When no annotation marks exist the user selected via checkboxes.
-    # curated_pages() already filtered main_text → count what's in there now.
+    annotation_rules_active = _annotation_rules_active(context)
+    user_selection_override = _has_user_selection_override(extracted_pages)
+    annotation_total = (
+        sum(_count_include_annotations(p) for p in extracted_pages)
+        if annotation_rules_active
+        else 0
+    )
+    # Count questions in curated main_text. If no annotation behavior was selected,
+    # this is the hard coverage target even if Gemini noticed visual marks in the PDF.
     question_count_per_page: dict[int, int] = {}
-    if annotation_total == 0:
-        for p in extracted_pages:
-            qc = _count_questions_in_text(p)
-            if qc:
-                question_count_per_page[p.page_number] = qc
+    for p in extracted_pages:
+        qc = _count_questions_in_text(p)
+        if qc:
+            question_count_per_page[p.page_number] = qc
     question_count_total = sum(question_count_per_page.values())
 
     pages_data = []
     for page in extracted_pages:
-        include_n = _count_include_annotations(page)
-        include_targets = _summarize_include_targets(page)
+        include_n = _count_include_annotations(page) if annotation_rules_active else 0
+        include_targets = (
+            _summarize_include_targets(page) if annotation_rules_active else []
+        )
         page_entry = {
             "page_number":        page.page_number,
             "content_type":       page.content_type,
@@ -710,7 +741,7 @@ def plan_slides(
                     "instruction": ann.instruction,
                     "is_include_intent": _is_include_instruction(ann.instruction),
                 }
-                for ann in page.annotations
+                for ann in (page.annotations if annotation_rules_active else [])
             ]
         }
         # Inject per-page question count so the AI knows exactly how many
@@ -734,8 +765,14 @@ def plan_slides(
             )
         pages_data.append(page_entry)
 
-    prompt = build_planning_prompt(context, strategy)
     only_marked = _only_marked_mode(context)
+    user_selection_override = _has_user_selection_override(extracted_pages)
+    only_marked = only_marked and not user_selection_override
+    prompt = build_planning_prompt(
+        context,
+        strategy,
+        user_selection_override=user_selection_override,
+    )
     summary = _global_summary(extracted_pages, context, question_count_override=question_count_total)
 
     # Detect cloze/comprehension passages so we can REQUIRE one passage_slide each.
@@ -772,9 +809,13 @@ def plan_slides(
         response_schema=FullSlidePlan
     )
 
-    # Use annotation count if any annotations exist; otherwise fall back to the
-    # question count derived from curated main_text (checkbox selection path).
-    expected_min_body = annotation_total or question_count_total
+    # Unless the user explicitly chose "only marked", question-bank PDFs should
+    # not shrink to the number of visible PDF marks Gemini noticed.
+    expected_min_body = (
+        annotation_total
+        if only_marked and not user_selection_override
+        else max(annotation_total, question_count_total)
+    )
 
     plan = None
     for attempt in range(1, MAX_PLAN_RETRIES + 2):
@@ -792,11 +833,11 @@ def plan_slides(
             shortfall_lines = ["\n\n⚠️ RETRY — YOUR PREVIOUS PLAN WAS REJECTED."]
             if actual_body < expected_min_body:
                 shortfall_lines.append(
-                    f"• You produced only {actual_body} body slides but the instructor "
-                    f"annotated {expected_min_body} items that each need their own slide "
+                    f"• You produced only {actual_body} body slides but the source "
+                    f"requires {expected_min_body} question/body slide(s) "
                     f"(short by {expected_min_body - actual_body}). Walk EVERY page's "
-                    f"'annotated_targets_that_need_their_own_slide' list and emit one "
-                    f"slide per target. Do NOT sample."
+                    f"questions / marked-target list and emit one slide per required "
+                    f"item. Do NOT sample."
                 )
             if only_marked and actual_body > expected_min_body:
                 shortfall_lines.append(
@@ -853,8 +894,16 @@ def plan_slides(
         if body_ok and passages_ok:
             break
 
+    print(
+        "  Planning coverage — "
+        f"detected_questions={question_count_total}, "
+        f"annotation_rules={'on' if annotation_rules_active else 'off'}, "
+        f"user_selection_override={'on' if user_selection_override else 'off'}, "
+        f"include_annotations={annotation_total}, "
+        f"expected_body={expected_min_body}"
+    )
     print(f"  Slide plan created — {plan.total_slides} slides "
-          f"(body={actual_body}/{'=' if only_marked else '≥'}{expected_min_body} annotated, "
+          f"(body={actual_body}/{'=' if only_marked else '≥'}{expected_min_body}, "
           f"passages={actual_passages}/{expected_passages})")
     if expected_min_body > 0 and actual_body < expected_min_body:
         print(f"  ⚠️  WARNING: planner still short by {expected_min_body - actual_body} "

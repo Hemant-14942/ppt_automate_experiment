@@ -70,9 +70,10 @@ def build_extraction_prompt(context: PDFContext, feedback: str | None = None) ->
 
     if not annotation_rules:
         annotation_rules = [
-            "- circle / highlight = emphasize this on the slide",
-            "- tick = include this as a key point",
-            "- handwritten = treat as an instructor note",
+            "- No instructor annotation meanings were selected for this PDF.",
+            "- If you see ticks, circles, highlights, underlines, or handwriting,",
+            "  record them only as visible marks. Do NOT interpret them as",
+            "  instructions to include, emphasize, filter, or create PPT slides.",
         ]
 
     annotations_text = "\n".join(annotation_rules)

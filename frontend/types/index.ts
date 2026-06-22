@@ -103,13 +103,14 @@ export interface FigureView {
   position?: string | null;
   label: string;
   use_mode: FigureUseMode;
-  source: "ai" | "manual";
+  source: "ai" | "manual" | "gallery";
   has_crop: boolean;
   included: boolean;
   placement: FigurePlacement;
   size: FigureSize;
   align: FigureAlign;
   attached_slide_uid?: string | null;
+  gallery_id?: string | null;
   rev: number;
 }
 
@@ -188,4 +189,23 @@ export interface PipelineStep {
   label: string;
   description: string;
   status: PipelineStepStatus;
+}
+
+// ── Image gallery ─────────────────────────────────────────────────────────────
+
+export type GalleryImageSource = "crop" | "generated" | "edited";
+
+export interface GalleryImage {
+  id: string;
+  label: string;
+  source: GalleryImageSource;
+  mime: string;
+  prompt?: string | null;
+  parent_id?: string | null;
+  figure_ref?: { page: number; id: string } | null;
+  created_at: number;
+}
+
+export interface GalleryResponse {
+  images: GalleryImage[];
 }
