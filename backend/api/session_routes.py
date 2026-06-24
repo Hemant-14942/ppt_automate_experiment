@@ -1031,7 +1031,7 @@ async def build_plan(session_id: str):
     started = time.monotonic()
 
     # Profile + plan run off the event loop (they use the sync Gemini client).
-    s.strategy = await asyncio.to_thread(profile_deck, approved, s.context, None)
+    s.strategy = await asyncio.to_thread(profile_deck, approved, s.context)
     s.slide_plan = await asyncio.to_thread(plan_slides, approved, s.context, s.strategy)
     _record_session_analytics(s, tracker, started, "planning")
     s.touch()

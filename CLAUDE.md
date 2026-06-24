@@ -9,7 +9,7 @@ See `.cursor/rules/project.mdc` for project layout and run commands.
 
 ## Key paths
 
-- Pipeline: `backend/pipeline/orchestrator.py`
+- Pipeline: `backend/api/session_routes.py` (human-in-the-loop flow)
 - Agents: `backend/agents/`
 - API: `backend/app.py`
 - PPT assets: `backend/assets/reference_ppts/`

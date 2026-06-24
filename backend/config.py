@@ -19,17 +19,7 @@ EXTRACTION_MODEL       = "gemini-2.5-flash"
 EXTRACTION_RETRY_MODEL = "gemini-3.5-flash"   # escalated model for the single retry attempt
 PLANNING_MODEL     = "gemini-3.5-flash"
 WRITING_MODEL      = "gemini-2.5-flash"
-CRITIC_MODEL       = "gemini-3.5-flash"    # legacy alias — prefer the 3 below
-
-# Split critic models — lets each agent use the right tier independently:
-#   PLAN_CRITIC_MODEL  : one-shot, high-reasoning (plan structure, style)
-#   SLIDE_CRITIC_MODEL : per-slide faithfulness + visual checks
-#   LAYOUT_MODEL       : per-slide layout classification (simple task)
-PLAN_CRITIC_MODEL  = "gemini-3.5-flash"
-SLIDE_CRITIC_MODEL = "gemini-3.5-flash"
-LAYOUT_MODEL       = "gemini-2.5-flash"
-ORCHESTRATOR_MODEL = "gemini-2.5-flash"
-PROFILER_MODEL     = "gemini-2.5-flash"  
+PROFILER_MODEL     = "gemini-2.5-flash"
 
 # PDF
 PDF_DPI = 150
@@ -82,29 +72,6 @@ MAX_EXTRACTION_RETRIES = 1
 # passages + MCQs) can otherwise truncate mid-JSON (finish_reason=MAX_TOKENS),
 # which makes the parse return None and the page silently drop.
 MAX_EXTRACTION_OUTPUT_TOKENS = 8192
-
-# Faithfulness critic resilience. Large decks can send 100+ critic calls; if one
-# call stalls, the whole gather() used to look stuck. Timeout fail-opens that
-# slide and lets the pipeline continue.
-FAITHFULNESS_TIMEOUT_SECONDS = int(os.getenv("FAITHFULNESS_TIMEOUT_SECONDS", "75"))
-FAITHFULNESS_PROGRESS_EVERY = int(os.getenv("FAITHFULNESS_PROGRESS_EVERY", "10"))
-
-# Visual critic — max CONTENT-REWRITE rounds after the initial full-deck pass
-# (Phase 3: raised from 1 so the loop can actually converge on hard slides).
-MAX_VISUAL_RETRIES = 2
-
-# Visual critic — max PAGINATION rounds. When the critic confirms a free-body
-# slide still overflows, we re-split it (more aggressively) instead of asking
-# the writer to delete content. Each round bumps the overflow "pressure".
-MAX_PAGINATION_ROUNDS = 2
-
-# Skip visual critic entirely (saves many API calls)
-# Set VISUAL_CRITIC_SKIP=true in .env to skip
-VISUAL_CRITIC_SKIP = os.getenv("VISUAL_CRITIC_SKIP", "false").lower() == "true"
-
-# Style memory
-MEMORY_DIR = os.path.join(os.path.dirname(__file__), "memory")
-STYLE_YAML = os.path.join(MEMORY_DIR, "style.yaml")
 
 # Devanagari (Hindi) rendering — the brand fonts (Anton/Poppins) have NO
 # Devanagari glyphs, so any Hindi text run is re-assigned to this font. The

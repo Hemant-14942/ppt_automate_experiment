@@ -28,5 +28,5 @@ cd frontend && npm run dev
 
 - Python venv lives at repo root (`.venv/`) or in `backend/.venv/`
 - Secrets in `.env` — never commit
-- Pipeline entry: `backend/pipeline/orchestrator.py` → `run_pipeline_async()`
+- Pipeline entry: `backend/api/session_routes.py` (HITL session flow)
 - Keep changes minimal; match existing agent/pipeline patterns in `backend/agents/`

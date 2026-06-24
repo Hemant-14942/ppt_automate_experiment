@@ -134,20 +134,10 @@ Return JSON only, matching the DeckStrategy schema.
 def profile_deck(
     extracted_pages: list[ExtractedPage],
     context: PDFContext,
-    learned_profiles: list[dict] | None = None,
 ) -> DeckStrategy:
-    """
-    Single LLM call → DeckStrategy. Falls back to defaults on any error.
-
-    `learned_profiles` (Phase 4) is the `learned_profiles` list from style.yaml;
-    if a calibration exists for this subject+purpose it is injected as a prior.
-    """
+    """Single LLM call → DeckStrategy. Falls back to defaults on any error."""
     if not extracted_pages:
         return DeckStrategy.default()
-
-    # local import avoids a circular dependency (pipeline → agents → pipeline)
-    from pipeline.profile_learner import find_learned_profile
-    prior = find_learned_profile(learned_profiles, context.subject, context.purpose)
 
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -158,7 +148,7 @@ def profile_deck(
         record_api_attempt("planning", PROFILER_MODEL)
         response = client.models.generate_content(
             model=PROFILER_MODEL,
-            contents=_build_profiler_prompt(extracted_pages, context, prior),
+            contents=_build_profiler_prompt(extracted_pages, context, None),
             config=config,
         )
         record_usage("planning", response.usage_metadata, model=PROFILER_MODEL)

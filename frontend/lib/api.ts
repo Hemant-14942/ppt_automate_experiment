@@ -20,48 +20,6 @@ async function asJson<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function generatePPT(
-  file: File,
-  context: PDFContext
-): Promise<GenerateResponse> {
-  const formData = new FormData();
-  formData.append("pdf_file", file);
-  formData.append("context_json", JSON.stringify(context));
-
-  const res = await fetch(`${BASE_URL}/api/generate`, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
-    throw new Error(err.detail || `Server error: ${res.status}`);
-  }
-
-  return res.json();
-}
-
-export async function generatePPTFromUrl(
-  pdfUrl: string,
-  context: PDFContext
-): Promise<GenerateResponse> {
-  const formData = new FormData();
-  formData.append("pdf_url", pdfUrl);
-  formData.append("context_json", JSON.stringify(context));
-
-  const res = await fetch(`${BASE_URL}/api/generate-from-url`, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
-    throw new Error(err.detail || `Server error: ${res.status}`);
-  }
-
-  return res.json();
-}
-
 /**
  * Download URLs go through the Next.js proxy routes (/api/download/... and
  * /api/download-pdf/...) so they are same-origin. The browser's `download`

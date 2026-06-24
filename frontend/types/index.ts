@@ -182,15 +182,6 @@ export interface TemplateOption {
   filename: string;
 }
 
-export type PipelineStepStatus = "waiting" | "active" | "done" | "error";
-
-export interface PipelineStep {
-  id: number;
-  label: string;
-  description: string;
-  status: PipelineStepStatus;
-}
-
 // ── Image gallery ─────────────────────────────────────────────────────────────
 
 export type GalleryImageSource = "crop" | "generated" | "edited";

@@ -1,22 +1,16 @@
-import asyncio
 import os
-import json
 import re
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from schemas.request import PDFContext, AnnotationItem, GenerateResponse
-from pipeline.orchestrator import run_pipeline_async
 from pipeline.pptx_to_pdf import (
     convert_pptx_to_pdf,
     is_available as libreoffice_available,
     LibreOfficeNotInstalled,
 )
-from config import UPLOAD_DIR, OUTPUT_DIR, STORAGE_BACKEND, TEMPLATE_PPTX
-import uuid
-from storage.s3_storage import upload_file_to_s3, create_presigned_download_url
+from config import OUTPUT_DIR, STORAGE_BACKEND, TEMPLATE_PPTX
 
 
 router = APIRouter()
@@ -53,17 +47,6 @@ def _list_templates() -> list[dict]:
 
 MAX_DRIVE_PDF_BYTES = 50 * 1024 * 1024
 DRIVE_DOWNLOAD_TIMEOUT = 60
-
-
-def _parse_context(context_json: str) -> PDFContext:
-    try:
-        context_data = json.loads(context_json)
-        return PDFContext(**context_data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid form data: {e}"
-        )
 
 
 def _extract_drive_file_id(pdf_url: str) -> str:
@@ -154,113 +137,6 @@ def _download_public_drive_pdf(pdf_url: str, pdf_path: str) -> None:
             status_code=400,
             detail=f"Could not download PDF from Google Drive: {e}"
         )
-
-
-async def _run_generation(pdf_path: str, context: PDFContext, job_id: str) -> GenerateResponse:
-    try:
-        result = await run_pipeline_async(pdf_path, context)
-
-        filename = result.get("filename")
-
-        if STORAGE_BACKEND == "s3" and result.get("status") == "success" and filename:
-            pptx_path = os.path.join(OUTPUT_DIR, filename)
-            s3_key = f"outputs/{job_id}/{filename}"
-
-            try:
-                upload_file_to_s3(
-                    local_path=pptx_path,
-                    s3_key=s3_key,
-                    content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                )
-                result["job_id"] = job_id
-                result["download_url"] = create_presigned_download_url(s3_key)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"PPT generated but S3 upload failed: {e}",
-                )
-
-            try:
-                os.remove(pptx_path)
-                print(f"  Cleaned up local PPT → {pptx_path}")
-            except Exception:
-                pass
-
-        return GenerateResponse(**result)
-    finally:
-        try:
-            os.remove(pdf_path)
-            print(f"  Cleaned up → {pdf_path}")
-        except Exception:
-            pass
-
-
-
-@router.post("/generate", response_model=GenerateResponse)
-async def generate_ppt(
-    pdf_file: UploadFile = File(...),
-    context_json: str = Form(...)
-):
-    """
-    Main endpoint — receives PDF + form context, returns PPT info.
-
-    Frontend sends:
-    - pdf_file:     the actual PDF file (multipart upload)
-    - context_json: form data as JSON string
-    """
-
-    # ── validate file type ──────────────────────────
-    if not pdf_file.filename.endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are accepted"
-        )
-
-    context = _parse_context(context_json)
-
-    # ── save uploaded PDF temporarily ───────────────
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    job_id = str(uuid.uuid4())
-
-    pdf_path = os.path.join(UPLOAD_DIR, f"{job_id}.pdf")
-
-    with open(pdf_path, "wb") as f:
-        content = await pdf_file.read()
-        f.write(content)
-
-    print(f"  PDF saved → {pdf_path}")
-
-    return await _run_generation(pdf_path, context, job_id)
-
-
-@router.post("/generate-from-url", response_model=GenerateResponse)
-async def generate_ppt_from_url(
-    pdf_url: str = Form(...),
-    context_json: str = Form(...)
-):
-    """
-    Receives a public Google Drive PDF link + form context, downloads the PDF,
-    and runs the same generation pipeline as a normal upload.
-    """
-    context = _parse_context(context_json)
-
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    job_id = str(uuid.uuid4())
-    pdf_path = os.path.join(UPLOAD_DIR, f"{job_id}.pdf")
-
-    try:
-        await asyncio.to_thread(_download_public_drive_pdf, pdf_url, pdf_path)
-    except Exception:
-        try:
-            os.remove(pdf_path)
-        except Exception:
-            pass
-        raise
-
-    print(f"  Drive PDF saved → {pdf_path}")
-
-    return await _run_generation(pdf_path, context, job_id)
 
 
 @router.get("/download/{filename}")
